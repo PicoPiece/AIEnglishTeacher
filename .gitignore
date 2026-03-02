@@ -1,0 +1,21 @@
+# Build output
+build/
+
+# Generated config
+sdkconfig
+sdkconfig.old
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Managed components (downloaded at build time)
+managed_components/
+dependencies.lock
