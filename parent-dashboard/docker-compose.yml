@@ -21,4 +21,4 @@ services:
 networks:
   xiaozhi-network:
     external: true
-    name: xiaozhi-esp32-server_default
+    name: xiaozhi-server_default

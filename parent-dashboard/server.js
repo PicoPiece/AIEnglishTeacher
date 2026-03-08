@@ -17,6 +17,8 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   charset: 'utf8mb4',
+  supportBigNumbers: true,
+  bigNumberStrings: true,
 });
 
 // --- Middleware ---
@@ -79,7 +81,7 @@ app.post('/login', async (req, res) => {
       return res.render('login', { error: 'Invalid username or password' });
     }
 
-    req.session.userId = Number(user.id);
+    req.session.userId = String(user.id);
     req.session.username = user.username;
     res.redirect('/dashboard');
   } catch (err) {
@@ -105,13 +107,16 @@ app.get('/dashboard', requireAuth, async (req, res) => {
 
     if (macList.length > 0) {
       const [sessions] = await pool.query(
-        `SELECT session_id, mac_address,
-                MIN(created_at) AS started_at,
-                MAX(created_at) AS last_msg_at,
-                COUNT(*) AS message_count
-         FROM ai_agent_chat_history
-         WHERE mac_address IN (?)
-         GROUP BY session_id, mac_address
+        `SELECT h.session_id, h.mac_address,
+                MIN(h.created_at) AS started_at,
+                MAX(h.created_at) AS last_msg_at,
+                COUNT(*) AS message_count,
+                (SELECT content FROM ai_agent_chat_history
+                 WHERE session_id = h.session_id AND chat_type = 1
+                 ORDER BY created_at ASC LIMIT 1) AS first_student_msg
+         FROM ai_agent_chat_history h
+         WHERE h.mac_address IN (?)
+         GROUP BY h.session_id, h.mac_address
          ORDER BY last_msg_at DESC
          LIMIT 20`,
         [macList]

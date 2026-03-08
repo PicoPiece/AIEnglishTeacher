@@ -3,10 +3,10 @@
 <h1 class="text-2xl font-bold text-gray-800 mb-6">Dashboard</h1>
 
 <section class="mb-8">
-  <h2 class="text-lg font-semibold text-gray-700 mb-3">My Devices</h2>
+  <h2 class="text-lg font-semibold text-gray-700 mb-3">Thiết bị của bé</h2>
   <% if (devices.length === 0) { %>
     <div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400">
-      No devices linked to your account yet.
+      Chưa có thiết bị nào được liên kết.
     </div>
   <% } else { %>
     <div class="grid gap-4 sm:grid-cols-2">
@@ -14,25 +14,34 @@
         <a href="/device/<%= encodeURIComponent(d.mac_address) %>"
            class="bg-white rounded-xl shadow-sm border hover:shadow-md transition p-4 block">
           <div class="flex items-center gap-3 mb-2">
-            <div class="w-10 h-10 bg-primary-100 text-primary-600 rounded-lg flex items-center justify-center">
+            <div class="w-10 h-10 bg-green-100 text-green-600 rounded-lg flex items-center justify-center">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
               </svg>
             </div>
             <div>
               <div class="font-semibold text-gray-800"><%= d.alias || d.mac_address %></div>
-              <div class="text-xs text-gray-400"><%= d.mac_address %></div>
+              <div class="text-xs text-gray-400"><%= d.board || 'AI English Teacher' %></div>
             </div>
           </div>
-          <div class="flex items-center gap-4 text-xs text-gray-500">
-            <% if (d.board) { %>
-              <span class="bg-gray-100 px-2 py-0.5 rounded"><%= d.board %></span>
-            <% } %>
+          <div class="flex items-center gap-3 text-xs text-gray-500">
             <% if (d.app_version) { %>
-              <span>v<%= d.app_version %></span>
+              <span class="bg-green-50 text-green-600 px-2 py-0.5 rounded">v<%= d.app_version %></span>
             <% } %>
             <% if (d.last_connected_at) { %>
-              <span>Last: <%= new Date(d.last_connected_at).toLocaleString() %></span>
+              <%
+                var now = Date.now();
+                var last = new Date(d.last_connected_at).getTime();
+                var diffMin = Math.floor((now - last) / 60000);
+                var timeAgo = '';
+                if (diffMin < 5) timeAgo = 'Vừa kết nối';
+                else if (diffMin < 60) timeAgo = diffMin + ' phút trước';
+                else if (diffMin < 1440) timeAgo = Math.floor(diffMin/60) + ' giờ trước';
+                else timeAgo = Math.floor(diffMin/1440) + ' ngày trước';
+              %>
+              <span class="<%= diffMin < 10 ? 'text-green-500' : 'text-gray-400' %>">
+                <%= timeAgo %>
+              </span>
             <% } %>
           </div>
         </a>
@@ -42,26 +51,58 @@
 </section>
 
 <section>
-  <h2 class="text-lg font-semibold text-gray-700 mb-3">Recent Conversations</h2>
+  <h2 class="text-lg font-semibold text-gray-700 mb-3">Lịch sử hội thoại</h2>
   <% if (recentSessions.length === 0) { %>
     <div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400">
-      No conversations yet. Start talking to your AI Teacher!
+      Chưa có cuộc hội thoại nào. Hãy để bé bắt đầu nói chuyện!
     </div>
   <% } else { %>
     <div class="bg-white rounded-xl shadow-sm border divide-y">
       <% recentSessions.forEach(function(s) { %>
+        <%
+          var sDate = new Date(s.started_at);
+          var now = Date.now();
+          var diffMin = Math.floor((now - sDate.getTime()) / 60000);
+          var timeLabel = '';
+          if (diffMin < 5) timeLabel = 'Vừa xong';
+          else if (diffMin < 60) timeLabel = diffMin + ' phút trước';
+          else if (diffMin < 1440) timeLabel = Math.floor(diffMin/60) + ' giờ trước';
+          else timeLabel = sDate.toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', year:'numeric' });
+
+          var preview = s.first_student_msg || '';
+          try {
+            var parsed = JSON.parse(preview);
+            if (parsed && parsed.content) preview = parsed.content;
+          } catch(e) {}
+          if (preview.length > 60) preview = preview.substring(0, 60) + '...';
+
+          var startEnd = sDate.toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' });
+          var endTime = new Date(s.last_msg_at).toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' });
+
+          var durationMin = Math.max(1, Math.floor((new Date(s.last_msg_at).getTime() - sDate.getTime()) / 60000));
+        %>
         <a href="/history/<%= encodeURIComponent(s.session_id) %>"
            class="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition">
-          <div>
-            <div class="text-sm font-medium text-gray-800">
-              <%= macToAlias[s.mac_address] || s.mac_address %>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-0.5">
+              <span class="text-sm font-medium text-gray-800">
+                <%= macToAlias[s.mac_address] || 'Thiết bị' %>
+              </span>
+              <span class="text-xs text-gray-400"><%= timeLabel %></span>
             </div>
-            <div class="text-xs text-gray-400">
-              <%= new Date(s.started_at).toLocaleString() %>
+            <% if (preview) { %>
+              <div class="text-sm text-gray-500 truncate">"<%= preview %>"</div>
+            <% } else { %>
+              <div class="text-sm text-gray-400 italic">Cuộc hội thoại</div>
+            <% } %>
+            <div class="text-xs text-gray-400 mt-0.5">
+              <%= startEnd %> – <%= endTime %> · <%= durationMin %> phút
             </div>
           </div>
-          <div class="flex items-center gap-2">
-            <span class="bg-primary-100 text-primary-700 text-xs font-medium px-2 py-0.5 rounded-full"><%= s.message_count %> msgs</span>
+          <div class="flex items-center gap-2 ml-3 flex-shrink-0">
+            <span class="bg-primary-100 text-primary-700 text-xs font-medium px-2 py-0.5 rounded-full">
+              <%= s.message_count %> tin nhắn
+            </span>
             <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
             </svg>
