@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= typeof pageTitle !== 'undefined' ? pageTitle : 'AI Teacher - Parent Dashboard' %></title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: { 50:'#EBF5FB',100:'#D6EAF8',200:'#AED6F1',300:'#85C1E9',400:'#5DADE2',500:'#2980B9',600:'#2471A3',700:'#1A5276' },
+            accent:  { 50:'#E8F8F5',100:'#D1F2EB',200:'#A3E4D7',300:'#76D7C4',400:'#48C9B0',500:'#1ABC9C' }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+  <nav class="bg-primary-700 text-white shadow-lg">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="/dashboard" class="text-lg font-bold tracking-wide">AI Teacher</a>
+      <% if (typeof username !== 'undefined' && username) { %>
+        <div class="flex items-center gap-4 text-sm">
+          <span class="opacity-80"><%= username %></span>
+          <a href="/logout" class="bg-primary-500 hover:bg-primary-400 px-3 py-1 rounded transition">Logout</a>
+        </div>
+      <% } %>
+    </div>
+  </nav>
+  <main class="flex-1 max-w-5xl w-full mx-auto px-4 py-6">

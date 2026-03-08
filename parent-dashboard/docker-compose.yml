@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  parent-dashboard:
+    build: .
+    container_name: parent-dashboard
+    restart: always
+    ports:
+      - "8005:8005"
+    environment:
+      - DB_HOST=xiaozhi-esp32-server-db
+      - DB_PORT=3306
+      - DB_USER=parent_reader
+      - DB_PASS=parent_readonly_pass
+      - DB_NAME=xiaozhi_esp32_server
+      - SESSION_SECRET=aiteacher-parent-session-2026
+      - PORT=8005
+    networks:
+      - xiaozhi-network
+
+networks:
+  xiaozhi-network:
+    external: true
+    name: xiaozhi-esp32-server_default

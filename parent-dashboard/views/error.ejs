@@ -1,0 +1,10 @@
+<%- include('partials/header', { pageTitle: 'Error', username: typeof username !== 'undefined' ? username : null }) %>
+<div class="flex items-center justify-center py-20">
+  <div class="text-center">
+    <div class="text-6xl text-gray-300 mb-4">!</div>
+    <h1 class="text-xl font-bold text-gray-700 mb-2">Something went wrong</h1>
+    <p class="text-gray-500 mb-6"><%= message %></p>
+    <a href="/dashboard" class="inline-block bg-primary-500 hover:bg-primary-600 text-white px-6 py-2 rounded-lg transition">Back to Dashboard</a>
+  </div>
+</div>
+<%- include('partials/footer') %>

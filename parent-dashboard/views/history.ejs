@@ -1,0 +1,50 @@
+<%- include('partials/header', { pageTitle: 'Chat History', username: username }) %>
+
+<div class="mb-4">
+  <a href="/dashboard" class="text-sm text-primary-500 hover:text-primary-700 transition">&larr; Back to Dashboard</a>
+</div>
+
+<div class="mb-6">
+  <h1 class="text-xl font-bold text-gray-800">Chat History</h1>
+  <p class="text-sm text-gray-400">Device: <%= deviceName %></p>
+</div>
+
+<% if (messages.length === 0) { %>
+  <div class="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">
+    No messages in this session.
+  </div>
+<% } else { %>
+  <div class="space-y-3 pb-4">
+    <% var currentDate = ''; %>
+    <% messages.forEach(function(m) { %>
+      <%
+        var msgDate = new Date(m.created_at).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+        var msgTime = new Date(m.created_at).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+        var isUser = (m.chat_type === 1);
+      %>
+      <% if (msgDate !== currentDate) { %>
+        <% currentDate = msgDate; %>
+        <div class="text-center my-4">
+          <span class="bg-gray-200 text-gray-500 text-xs px-3 py-1 rounded-full"><%= msgDate %></span>
+        </div>
+      <% } %>
+
+      <div class="flex <%= isUser ? 'justify-end' : 'justify-start' %>">
+        <div class="max-w-[80%] sm:max-w-[70%]">
+          <div class="text-xs mb-1 <%= isUser ? 'text-right text-gray-400' : 'text-left text-primary-400' %>">
+            <%= isUser ? 'Student' : 'AI Teacher' %>
+            <span class="text-gray-300 ml-1"><%= msgTime %></span>
+          </div>
+          <div class="<%= isUser
+            ? 'bg-green-100 text-gray-800 rounded-2xl rounded-tr-md'
+            : 'bg-primary-100 text-gray-800 rounded-2xl rounded-tl-md'
+          %> px-4 py-2.5 text-sm leading-relaxed shadow-sm">
+            <%= m.content %>
+          </div>
+        </div>
+      </div>
+    <% }) %>
+  </div>
+<% } %>
+
+<%- include('partials/footer') %>

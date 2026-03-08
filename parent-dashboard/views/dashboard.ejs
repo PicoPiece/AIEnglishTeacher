@@ -1,0 +1,75 @@
+<%- include('partials/header', { pageTitle: 'Dashboard', username: username }) %>
+
+<h1 class="text-2xl font-bold text-gray-800 mb-6">Dashboard</h1>
+
+<section class="mb-8">
+  <h2 class="text-lg font-semibold text-gray-700 mb-3">My Devices</h2>
+  <% if (devices.length === 0) { %>
+    <div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400">
+      No devices linked to your account yet.
+    </div>
+  <% } else { %>
+    <div class="grid gap-4 sm:grid-cols-2">
+      <% devices.forEach(function(d) { %>
+        <a href="/device/<%= encodeURIComponent(d.mac_address) %>"
+           class="bg-white rounded-xl shadow-sm border hover:shadow-md transition p-4 block">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="w-10 h-10 bg-primary-100 text-primary-600 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+              </svg>
+            </div>
+            <div>
+              <div class="font-semibold text-gray-800"><%= d.alias || d.mac_address %></div>
+              <div class="text-xs text-gray-400"><%= d.mac_address %></div>
+            </div>
+          </div>
+          <div class="flex items-center gap-4 text-xs text-gray-500">
+            <% if (d.board) { %>
+              <span class="bg-gray-100 px-2 py-0.5 rounded"><%= d.board %></span>
+            <% } %>
+            <% if (d.app_version) { %>
+              <span>v<%= d.app_version %></span>
+            <% } %>
+            <% if (d.last_connected_at) { %>
+              <span>Last: <%= new Date(d.last_connected_at).toLocaleString() %></span>
+            <% } %>
+          </div>
+        </a>
+      <% }) %>
+    </div>
+  <% } %>
+</section>
+
+<section>
+  <h2 class="text-lg font-semibold text-gray-700 mb-3">Recent Conversations</h2>
+  <% if (recentSessions.length === 0) { %>
+    <div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400">
+      No conversations yet. Start talking to your AI Teacher!
+    </div>
+  <% } else { %>
+    <div class="bg-white rounded-xl shadow-sm border divide-y">
+      <% recentSessions.forEach(function(s) { %>
+        <a href="/history/<%= encodeURIComponent(s.session_id) %>"
+           class="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition">
+          <div>
+            <div class="text-sm font-medium text-gray-800">
+              <%= macToAlias[s.mac_address] || s.mac_address %>
+            </div>
+            <div class="text-xs text-gray-400">
+              <%= new Date(s.started_at).toLocaleString() %>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="bg-primary-100 text-primary-700 text-xs font-medium px-2 py-0.5 rounded-full"><%= s.message_count %> msgs</span>
+            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </div>
+        </a>
+      <% }) %>
+    </div>
+  <% } %>
+</section>
+
+<%- include('partials/footer') %>
