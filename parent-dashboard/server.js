@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const path = require('path');
 
 const app = express();
+app.use(express.json());
 const PORT = process.env.PORT || 8005;
 
 // --- Database pool ---
@@ -36,6 +37,47 @@ app.use(session({
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.redirect('/login');
   next();
+}
+
+// --- Prompt builder helpers ---
+
+const CONFIG_PREFIX = '<!-- PARENT_CONFIG:';
+const CONFIG_SUFFIX = '-->';
+
+const DEFAULT_CORE_INSTRUCTIONS = `Speak clearly and simply. Use short sentences.
+If the child makes a grammar mistake, gently correct them and explain why.
+Encourage the child with positive feedback.
+Mix Vietnamese explanations when the child seems confused.
+Keep conversations fun and engaging.`;
+
+function buildPromptFromFields(fields) {
+  const { childName, age, level, topics, extraNotes } = fields;
+  const configJson = JSON.stringify({ childName, age, level, topics, extraNotes });
+  const lines = [];
+  lines.push(`${CONFIG_PREFIX} ${configJson} ${CONFIG_SUFFIX}`);
+  lines.push(`You are Teacher AI, a fun, patient English tutor for ${childName || 'the student'}${age ? ` (${age} years old)` : ''}.`);
+  if (level) lines.push(`English level: ${level}.`);
+  if (topics) lines.push(`Topics they enjoy: ${topics}.`);
+  if (extraNotes) lines.push(`\nAdditional notes from parent: ${extraNotes}`);
+  lines.push('');
+  lines.push(DEFAULT_CORE_INSTRUCTIONS);
+  return lines.join('\n');
+}
+
+function parsePromptFields(systemPrompt) {
+  if (!systemPrompt) return { structured: null, raw: systemPrompt || '' };
+  const startIdx = systemPrompt.indexOf(CONFIG_PREFIX);
+  if (startIdx === -1) return { structured: null, raw: systemPrompt };
+  const jsonStart = startIdx + CONFIG_PREFIX.length;
+  const endIdx = systemPrompt.indexOf(CONFIG_SUFFIX, jsonStart);
+  if (endIdx === -1) return { structured: null, raw: systemPrompt };
+  try {
+    const json = systemPrompt.substring(jsonStart, endIdx).trim();
+    const fields = JSON.parse(json);
+    return { structured: fields, raw: systemPrompt };
+  } catch {
+    return { structured: null, raw: systemPrompt };
+  }
 }
 
 // --- Routes ---
@@ -213,6 +255,89 @@ app.get('/history/:sessionId', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('History error:', err);
     res.status(500).render('error', { message: 'Failed to load chat history' });
+  }
+});
+
+app.get('/device/:mac/settings', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devRows] = await pool.query(
+      'SELECT id, mac_address, alias, agent_id FROM ai_device WHERE mac_address = ? AND user_id = ?',
+      [mac, req.session.userId]
+    );
+    if (devRows.length === 0) return res.status(403).render('error', { message: 'Device not found' });
+    const device = devRows[0];
+    if (!device.agent_id) return res.render('error', { message: 'No AI agent linked to this device' });
+
+    const [agentRows] = await pool.query(
+      'SELECT id, system_prompt FROM ai_agent WHERE id = ?',
+      [device.agent_id]
+    );
+    if (agentRows.length === 0) return res.render('error', { message: 'Agent not found' });
+
+    const { structured, raw } = parsePromptFields(agentRows[0].system_prompt);
+
+    res.render('device-settings', {
+      username: req.session.username,
+      device,
+      structured,
+      rawPrompt: raw,
+      success: req.query.saved === '1' ? 'Đã lưu thành công!' : null,
+      error: null,
+    });
+  } catch (err) {
+    console.error('Settings GET error:', err);
+    res.status(500).render('error', { message: 'Failed to load settings' });
+  }
+});
+
+app.post('/device/:mac/settings', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devRows] = await pool.query(
+      'SELECT id, mac_address, alias, agent_id FROM ai_device WHERE mac_address = ? AND user_id = ?',
+      [mac, req.session.userId]
+    );
+    if (devRows.length === 0) return res.status(403).render('error', { message: 'Device not found' });
+    const device = devRows[0];
+    if (!device.agent_id) return res.render('error', { message: 'No AI agent linked to this device' });
+
+    const mode = req.body.mode;
+    let newPrompt;
+
+    if (mode === 'structured') {
+      newPrompt = buildPromptFromFields({
+        childName: (req.body.childName || '').trim(),
+        age: (req.body.age || '').trim(),
+        level: (req.body.level || '').trim(),
+        topics: (req.body.topics || '').trim(),
+        extraNotes: (req.body.extraNotes || '').trim(),
+      });
+    } else {
+      newPrompt = (req.body.rawPrompt || '').trim();
+    }
+
+    if (!newPrompt) {
+      const { structured, raw } = parsePromptFields(newPrompt);
+      return res.render('device-settings', {
+        username: req.session.username,
+        device,
+        structured,
+        rawPrompt: raw,
+        success: null,
+        error: 'Prompt không được để trống.',
+      });
+    }
+
+    await pool.query(
+      'UPDATE ai_agent SET system_prompt = ? WHERE id = ?',
+      [newPrompt, device.agent_id]
+    );
+
+    res.redirect(`/device/${encodeURIComponent(mac)}/settings?saved=1`);
+  } catch (err) {
+    console.error('Settings POST error:', err);
+    res.status(500).render('error', { message: 'Failed to save settings' });
   }
 });
 

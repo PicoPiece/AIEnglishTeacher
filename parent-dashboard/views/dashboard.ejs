@@ -11,40 +11,52 @@
   <% } else { %>
     <div class="grid gap-4 sm:grid-cols-2">
       <% devices.forEach(function(d) { %>
-        <a href="/device/<%= encodeURIComponent(d.mac_address) %>"
-           class="bg-white rounded-xl shadow-sm border hover:shadow-md transition p-4 block">
-          <div class="flex items-center gap-3 mb-2">
-            <div class="w-10 h-10 bg-green-100 text-green-600 rounded-lg flex items-center justify-center">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+        <div class="bg-white rounded-xl shadow-sm border hover:shadow-md transition p-4">
+          <a href="/device/<%= encodeURIComponent(d.mac_address) %>" class="block">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="w-10 h-10 bg-green-100 text-green-600 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+                </svg>
+              </div>
+              <div>
+                <div class="font-semibold text-gray-800"><%= d.alias || d.mac_address %></div>
+                <div class="text-xs text-gray-400"><%= d.board || 'AI English Teacher' %></div>
+              </div>
+            </div>
+          </a>
+          <div class="flex items-center justify-between text-xs text-gray-500">
+            <div class="flex items-center gap-3">
+              <% if (d.app_version) { %>
+                <span class="bg-green-50 text-green-600 px-2 py-0.5 rounded">v<%= d.app_version %></span>
+              <% } %>
+              <% if (d.last_connected_at) { %>
+                <%
+                  var now = Date.now();
+                  var last = new Date(d.last_connected_at).getTime();
+                  var diffMin = Math.floor((now - last) / 60000);
+                  var timeAgo = '';
+                  if (diffMin < 5) timeAgo = 'Vừa kết nối';
+                  else if (diffMin < 60) timeAgo = diffMin + ' phút trước';
+                  else if (diffMin < 1440) timeAgo = Math.floor(diffMin/60) + ' giờ trước';
+                  else timeAgo = Math.floor(diffMin/1440) + ' ngày trước';
+                %>
+                <span class="<%= diffMin < 10 ? 'text-green-500' : 'text-gray-400' %>">
+                  <%= timeAgo %>
+                </span>
+              <% } %>
+            </div>
+            <a href="/device/<%= encodeURIComponent(d.mac_address) %>/settings"
+               class="inline-flex items-center gap-1 text-gray-400 hover:text-primary-500 transition"
+               title="Cài đặt AI">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
               </svg>
-            </div>
-            <div>
-              <div class="font-semibold text-gray-800"><%= d.alias || d.mac_address %></div>
-              <div class="text-xs text-gray-400"><%= d.board || 'AI English Teacher' %></div>
-            </div>
+              <span>Cài đặt</span>
+            </a>
           </div>
-          <div class="flex items-center gap-3 text-xs text-gray-500">
-            <% if (d.app_version) { %>
-              <span class="bg-green-50 text-green-600 px-2 py-0.5 rounded">v<%= d.app_version %></span>
-            <% } %>
-            <% if (d.last_connected_at) { %>
-              <%
-                var now = Date.now();
-                var last = new Date(d.last_connected_at).getTime();
-                var diffMin = Math.floor((now - last) / 60000);
-                var timeAgo = '';
-                if (diffMin < 5) timeAgo = 'Vừa kết nối';
-                else if (diffMin < 60) timeAgo = diffMin + ' phút trước';
-                else if (diffMin < 1440) timeAgo = Math.floor(diffMin/60) + ' giờ trước';
-                else timeAgo = Math.floor(diffMin/1440) + ' ngày trước';
-              %>
-              <span class="<%= diffMin < 10 ? 'text-green-500' : 'text-gray-400' %>">
-                <%= timeAgo %>
-              </span>
-            <% } %>
-          </div>
-        </a>
+        </div>
       <% }) %>
     </div>
   <% } %>
