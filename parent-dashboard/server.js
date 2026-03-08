@@ -2,6 +2,8 @@ const express = require('express');
 const session = require('express-session');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const fs = require('fs');
 const path = require('path');
 
 const app = express();
@@ -38,6 +40,27 @@ function requireAuth(req, res, next) {
   if (!req.session.userId) return res.redirect('/login');
   next();
 }
+
+// --- Music file upload ---
+const MUSIC_DIR = process.env.MUSIC_DIR || path.join(__dirname, 'data', 'music');
+if (!fs.existsSync(MUSIC_DIR)) fs.mkdirSync(MUSIC_DIR, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, MUSIC_DIR),
+    filename: (req, file, cb) => {
+      const unique = Date.now() + '-' + Math.round(Math.random() * 1e6);
+      const ext = path.extname(file.originalname) || '.mp3';
+      cb(null, unique + ext);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.mp3', '.wav', '.ogg', '.m4a'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, allowed.includes(ext));
+  },
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
 
 // --- Prompt builder helpers ---
 
@@ -424,6 +447,315 @@ app.post('/device/:mac/settings', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Settings POST error:', err);
     res.status(500).render('error', { message: 'Failed to save settings' });
+  }
+});
+
+// ===========================================
+// Phase 2: Music & Playlist routes
+// ===========================================
+
+const MUSIC_CATEGORIES = [
+  { value: 'phonics', label: 'Phonics' },
+  { value: 'nursery', label: 'Nursery Rhymes' },
+  { value: 'vocabulary', label: 'Vocabulary' },
+  { value: 'stories', label: 'Stories' },
+  { value: 'songs', label: 'English Songs' },
+  { value: 'general', label: 'General' },
+];
+
+// --- Music Library ---
+app.get('/music', requireAuth, async (req, res) => {
+  try {
+    const cat = req.query.category || '';
+    let query = 'SELECT * FROM parent_music WHERE user_id = ?';
+    const params = [req.session.userId];
+    if (cat) { query += ' AND category = ?'; params.push(cat); }
+    query += ' ORDER BY sort_order ASC, created_at DESC';
+    const [songs] = await pool.query(query, params);
+
+    res.render('music', {
+      username: req.session.username,
+      songs,
+      categories: MUSIC_CATEGORIES,
+      activeCategory: cat,
+    });
+  } catch (err) {
+    console.error('Music list error:', err);
+    res.status(500).render('error', { message: 'Failed to load music library' });
+  }
+});
+
+app.post('/music/upload', requireAuth, upload.array('files', 20), async (req, res) => {
+  try {
+    const category = req.body.category || 'general';
+    for (const file of (req.files || [])) {
+      const title = req.body.title || path.basename(file.originalname, path.extname(file.originalname));
+      const artist = req.body.artist || '';
+      await pool.query(
+        `INSERT INTO parent_music (user_id, title, artist, category, filename, original_name, file_size)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [req.session.userId, title, artist, category, file.filename, file.originalname, file.size]
+      );
+    }
+    res.redirect('/music' + (category !== 'general' ? '?category=' + category : ''));
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).render('error', { message: 'Upload failed' });
+  }
+});
+
+app.post('/music/:id/delete', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT filename FROM parent_music WHERE id = ? AND user_id = ?',
+      [req.params.id, req.session.userId]
+    );
+    if (rows.length > 0) {
+      const filepath = path.join(MUSIC_DIR, rows[0].filename);
+      if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+      await pool.query('DELETE FROM parent_music WHERE id = ?', [req.params.id]);
+    }
+    res.redirect('/music');
+  } catch (err) {
+    console.error('Delete music error:', err);
+    res.status(500).render('error', { message: 'Delete failed' });
+  }
+});
+
+// --- Music streaming ---
+app.get('/api/music/stream/:id', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT filename, original_name FROM parent_music WHERE id = ? AND user_id = ?',
+      [req.params.id, req.session.userId]
+    );
+    if (rows.length === 0) return res.status(404).send('Not found');
+    const filepath = path.join(MUSIC_DIR, rows[0].filename);
+    if (!fs.existsSync(filepath)) return res.status(404).send('File not found');
+
+    const stat = fs.statSync(filepath);
+    const ext = path.extname(rows[0].filename).toLowerCase();
+    const mimeMap = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4' };
+    const mime = mimeMap[ext] || 'audio/mpeg';
+
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': end - start + 1,
+        'Content-Type': mime,
+      });
+      fs.createReadStream(filepath, { start, end }).pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Length': stat.size,
+        'Content-Type': mime,
+        'Accept-Ranges': 'bytes',
+      });
+      fs.createReadStream(filepath).pipe(res);
+    }
+  } catch (err) {
+    console.error('Stream error:', err);
+    res.status(500).send('Stream error');
+  }
+});
+
+// --- Playlists ---
+app.get('/playlists', requireAuth, async (req, res) => {
+  try {
+    const [playlists] = await pool.query(
+      `SELECT p.*, COUNT(pi.id) AS song_count
+       FROM parent_playlist p
+       LEFT JOIN parent_playlist_item pi ON pi.playlist_id = p.id
+       WHERE p.user_id = ?
+       GROUP BY p.id
+       ORDER BY p.created_at DESC`,
+      [req.session.userId]
+    );
+    res.render('playlists', { username: req.session.username, playlists });
+  } catch (err) {
+    console.error('Playlists error:', err);
+    res.status(500).render('error', { message: 'Failed to load playlists' });
+  }
+});
+
+app.post('/playlists', requireAuth, async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name || !name.trim()) return res.redirect('/playlists');
+    await pool.query(
+      'INSERT INTO parent_playlist (user_id, name, description) VALUES (?, ?, ?)',
+      [req.session.userId, name.trim(), (description || '').trim()]
+    );
+    res.redirect('/playlists');
+  } catch (err) {
+    console.error('Create playlist error:', err);
+    res.status(500).render('error', { message: 'Failed to create playlist' });
+  }
+});
+
+app.get('/playlists/:id', requireAuth, async (req, res) => {
+  try {
+    const [plRows] = await pool.query(
+      'SELECT * FROM parent_playlist WHERE id = ? AND user_id = ?',
+      [req.params.id, req.session.userId]
+    );
+    if (plRows.length === 0) return res.status(404).render('error', { message: 'Playlist not found' });
+    const playlist = plRows[0];
+
+    const [items] = await pool.query(
+      `SELECT pi.id AS item_id, pi.sort_order, m.*
+       FROM parent_playlist_item pi
+       JOIN parent_music m ON m.id = pi.music_id
+       WHERE pi.playlist_id = ?
+       ORDER BY pi.sort_order ASC, m.title ASC`,
+      [playlist.id]
+    );
+
+    const [allSongs] = await pool.query(
+      'SELECT id, title, artist, category FROM parent_music WHERE user_id = ? ORDER BY title ASC',
+      [req.session.userId]
+    );
+
+    const inPlaylist = new Set(items.map(i => i.id));
+    const availableSongs = allSongs.filter(s => !inPlaylist.has(s.id));
+
+    res.render('playlist-detail', {
+      username: req.session.username,
+      playlist,
+      items,
+      availableSongs,
+    });
+  } catch (err) {
+    console.error('Playlist detail error:', err);
+    res.status(500).render('error', { message: 'Failed to load playlist' });
+  }
+});
+
+app.post('/playlists/:id/add-song', requireAuth, async (req, res) => {
+  try {
+    const playlistId = req.params.id;
+    const musicId = req.body.music_id;
+    const [plRows] = await pool.query(
+      'SELECT id FROM parent_playlist WHERE id = ? AND user_id = ?',
+      [playlistId, req.session.userId]
+    );
+    if (plRows.length === 0) return res.status(403).send('Not allowed');
+
+    const [maxOrder] = await pool.query(
+      'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM parent_playlist_item WHERE playlist_id = ?',
+      [playlistId]
+    );
+    await pool.query(
+      'INSERT INTO parent_playlist_item (playlist_id, music_id, sort_order) VALUES (?, ?, ?)',
+      [playlistId, musicId, maxOrder[0].next_order]
+    );
+    res.redirect(`/playlists/${playlistId}`);
+  } catch (err) {
+    console.error('Add song error:', err);
+    res.status(500).render('error', { message: 'Failed to add song' });
+  }
+});
+
+app.post('/playlists/:id/remove-song', requireAuth, async (req, res) => {
+  try {
+    const playlistId = req.params.id;
+    const itemId = req.body.item_id;
+    const [plRows] = await pool.query(
+      'SELECT id FROM parent_playlist WHERE id = ? AND user_id = ?',
+      [playlistId, req.session.userId]
+    );
+    if (plRows.length === 0) return res.status(403).send('Not allowed');
+    await pool.query('DELETE FROM parent_playlist_item WHERE id = ? AND playlist_id = ?', [itemId, playlistId]);
+    res.redirect(`/playlists/${playlistId}`);
+  } catch (err) {
+    console.error('Remove song error:', err);
+    res.status(500).render('error', { message: 'Failed to remove song' });
+  }
+});
+
+app.post('/playlists/:id/delete', requireAuth, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM parent_playlist WHERE id = ? AND user_id = ?',
+      [req.params.id, req.session.userId]);
+    res.redirect('/playlists');
+  } catch (err) {
+    console.error('Delete playlist error:', err);
+    res.status(500).render('error', { message: 'Failed to delete playlist' });
+  }
+});
+
+// --- Play Schedule ---
+app.get('/schedules', requireAuth, async (req, res) => {
+  try {
+    const [devices] = await pool.query(
+      'SELECT mac_address, alias FROM ai_device WHERE user_id = ?', [req.session.userId]
+    );
+    const [playlists] = await pool.query(
+      'SELECT id, name FROM parent_playlist WHERE user_id = ?', [req.session.userId]
+    );
+    const [schedules] = await pool.query(
+      `SELECT s.*, p.name AS playlist_name, d.alias AS device_name
+       FROM parent_play_schedule s
+       LEFT JOIN parent_playlist p ON p.id = s.playlist_id
+       LEFT JOIN ai_device d ON d.mac_address = s.mac_address
+       WHERE s.user_id = ?
+       ORDER BY s.start_time ASC`,
+      [req.session.userId]
+    );
+    res.render('schedules', {
+      username: req.session.username,
+      schedules,
+      devices,
+      playlists,
+    });
+  } catch (err) {
+    console.error('Schedules error:', err);
+    res.status(500).render('error', { message: 'Failed to load schedules' });
+  }
+});
+
+app.post('/schedules', requireAuth, async (req, res) => {
+  try {
+    const { mac_address, playlist_id, start_time, end_time, days_of_week } = req.body;
+    const days = Array.isArray(days_of_week) ? days_of_week.join(',') : (days_of_week || '1,2,3,4,5,6,7');
+    await pool.query(
+      `INSERT INTO parent_play_schedule (user_id, mac_address, playlist_id, start_time, end_time, days_of_week)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [req.session.userId, mac_address, playlist_id, start_time, end_time, days]
+    );
+    res.redirect('/schedules');
+  } catch (err) {
+    console.error('Create schedule error:', err);
+    res.status(500).render('error', { message: 'Failed to create schedule' });
+  }
+});
+
+app.post('/schedules/:id/toggle', requireAuth, async (req, res) => {
+  try {
+    await pool.query(
+      'UPDATE parent_play_schedule SET is_active = NOT is_active WHERE id = ? AND user_id = ?',
+      [req.params.id, req.session.userId]
+    );
+    res.redirect('/schedules');
+  } catch (err) {
+    console.error('Toggle schedule error:', err);
+    res.status(500).render('error', { message: 'Failed to toggle schedule' });
+  }
+});
+
+app.post('/schedules/:id/delete', requireAuth, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM parent_play_schedule WHERE id = ? AND user_id = ?',
+      [req.params.id, req.session.userId]);
+    res.redirect('/schedules');
+  } catch (err) {
+    console.error('Delete schedule error:', err);
+    res.status(500).render('error', { message: 'Failed to delete schedule' });
   }
 });
 

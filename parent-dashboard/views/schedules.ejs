@@ -1,0 +1,128 @@
+<%- include('partials/header', { pageTitle: 'Lịch phát nhạc', username }) %>
+
+<div class="flex items-center gap-3 mb-6">
+  <div class="w-12 h-12 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+  </div>
+  <div>
+    <h1 class="text-xl font-bold text-gray-800">Lịch phát nhạc</h1>
+    <div class="text-sm text-gray-400">Tự động phát playlist theo lịch cho thiết bị</div>
+  </div>
+</div>
+
+<% if (playlists.length === 0 || devices.length === 0) { %>
+  <div class="bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 rounded-lg text-sm mb-6">
+    <% if (devices.length === 0) { %>Bạn chưa có thiết bị nào.<% } %>
+    <% if (playlists.length === 0) { %>Bạn chưa có playlist nào. <a href="/playlists" class="underline">Tạo playlist</a> trước.<% } %>
+  </div>
+<% } else { %>
+
+<!-- Create schedule -->
+<div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+  <h2 class="text-sm font-semibold text-gray-700 mb-3">Tạo lịch phát mới</h2>
+  <form action="/schedules" method="POST" class="space-y-3">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Thiết bị</label>
+        <select name="mac_address" required class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-300 focus:border-amber-400 outline-none">
+          <% devices.forEach(function(d) { %>
+            <option value="<%= d.mac_address %>"><%= d.alias || d.mac_address %></option>
+          <% }) %>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Playlist</label>
+        <select name="playlist_id" required class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-300 focus:border-amber-400 outline-none">
+          <% playlists.forEach(function(p) { %>
+            <option value="<%= p.id %>"><%= p.name %></option>
+          <% }) %>
+        </select>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Giờ bắt đầu</label>
+        <input type="time" name="start_time" value="19:00" required class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-300 focus:border-amber-400 outline-none">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Giờ kết thúc</label>
+        <input type="time" name="end_time" value="20:00" required class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-300 focus:border-amber-400 outline-none">
+      </div>
+    </div>
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Ngày trong tuần</label>
+      <div class="flex gap-2 flex-wrap">
+        <% ['T2','T3','T4','T5','T6','T7','CN'].forEach(function(label, i) { %>
+          <label class="inline-flex items-center gap-1 bg-gray-50 px-2.5 py-1.5 rounded-lg text-sm cursor-pointer hover:bg-amber-50 transition">
+            <input type="checkbox" name="days_of_week" value="<%= i + 1 %>" checked class="accent-amber-500">
+            <span><%= label %></span>
+          </label>
+        <% }) %>
+      </div>
+    </div>
+    <button type="submit" class="bg-amber-500 hover:bg-amber-600 text-white font-medium px-5 py-2 rounded-lg transition text-sm">
+      Tạo lịch
+    </button>
+  </form>
+</div>
+
+<% } %>
+
+<!-- Existing schedules -->
+<% if (schedules.length === 0) { %>
+  <div class="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">
+    Chưa có lịch phát nào.
+  </div>
+<% } else { %>
+  <div class="bg-white rounded-xl shadow-sm border divide-y">
+    <% schedules.forEach(function(s) { %>
+      <%
+        var dayNames = ['','T2','T3','T4','T5','T6','T7','CN'];
+        var days = (s.days_of_week || '').split(',').map(function(d) { return dayNames[parseInt(d)] || d; }).join(', ');
+        var startTime = String(s.start_time).slice(0, 5);
+        var endTime = String(s.end_time).slice(0, 5);
+      %>
+      <div class="flex items-center gap-3 px-4 py-3">
+        <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg
+                    <%= s.is_active ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-400' %>">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium text-gray-800">
+            <%= startTime %> - <%= endTime %>
+            <span class="ml-2 text-xs px-1.5 py-0.5 rounded <%= s.is_active ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400' %>">
+              <%= s.is_active ? 'Đang bật' : 'Tắt' %>
+            </span>
+          </div>
+          <div class="text-xs text-gray-400 truncate">
+            <%= s.playlist_name || 'Playlist #' + s.playlist_id %>
+            &middot; <%= s.device_name || s.mac_address %>
+            &middot; <%= days %>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <form action="/schedules/<%= s.id %>/toggle" method="POST">
+            <button type="submit" class="text-xs px-2.5 py-1 rounded-lg transition
+                    <%= s.is_active ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-amber-100 text-amber-600 hover:bg-amber-200' %>">
+              <%= s.is_active ? 'Tắt' : 'Bật' %>
+            </button>
+          </form>
+          <form action="/schedules/<%= s.id %>/delete" method="POST"
+                onsubmit="return confirm('Xóa lịch phát này?')">
+            <button type="submit" class="text-xs text-red-400 hover:text-red-600 p-1">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </div>
+    <% }) %>
+  </div>
+<% } %>
+
+<%- include('partials/footer') %>
