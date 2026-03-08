@@ -1,0 +1,110 @@
+<%- include('partials/header', { pageTitle: 'Thống kê - ' + (device.alias || device.mac_address), username }) %>
+
+<div class="mb-4 flex items-center gap-2 text-sm text-gray-400">
+  <a href="/dashboard" class="hover:text-primary-500 transition">Dashboard</a>
+  <span>/</span>
+  <a href="/device/<%= encodeURIComponent(device.mac_address) %>" class="hover:text-primary-500 transition"><%= device.alias || device.mac_address %></a>
+  <span>/</span>
+  <span class="text-gray-600">Thống kê</span>
+</div>
+
+<div class="flex items-center gap-3 mb-6">
+  <div class="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+    </svg>
+  </div>
+  <div>
+    <h1 class="text-xl font-bold text-gray-800">Thống kê học tập</h1>
+    <div class="text-sm text-gray-400"><%= device.alias || device.mac_address %></div>
+  </div>
+</div>
+
+<!-- Summary cards -->
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+  <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+    <div class="text-2xl font-bold text-primary-600"><%= totals.total_sessions || 0 %></div>
+    <div class="text-xs text-gray-400 mt-1">Phiên hội thoại</div>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+    <div class="text-2xl font-bold text-green-600"><%= totals.student_messages || 0 %></div>
+    <div class="text-xs text-gray-400 mt-1">Lượt bé nói</div>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+    <div class="text-2xl font-bold text-blue-600"><%= totals.ai_messages || 0 %></div>
+    <div class="text-xs text-gray-400 mt-1">Lượt AI trả lời</div>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+    <div class="text-2xl font-bold text-purple-600"><%= avgMinutes %><span class="text-sm font-normal text-gray-400"> phút</span></div>
+    <div class="text-xs text-gray-400 mt-1">TB mỗi phiên</div>
+  </div>
+</div>
+
+<!-- Daily activity chart (last 14 days) -->
+<div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+  <h2 class="text-sm font-semibold text-gray-700 mb-4">Hoạt động 14 ngày qua</h2>
+  <%
+    var maxMsg = Math.max(1, ...dailyData.map(d => d.messages));
+  %>
+  <div class="flex items-end gap-1 h-32">
+    <% dailyData.forEach(function(d, i) { %>
+      <%
+        var pct = Math.max(2, Math.round((d.messages / maxMsg) * 100));
+        var dayLabel = new Date(d.day + 'T00:00:00').toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+        var isToday = d.day === new Date().toISOString().slice(0, 10);
+      %>
+      <div class="flex-1 flex flex-col items-center gap-1" title="<%= dayLabel %>: <%= d.messages %> tin nhắn, <%= d.sessions %> phiên">
+        <div class="w-full rounded-t transition-all duration-300
+                    <%= d.messages > 0 ? 'bg-primary-400 hover:bg-primary-500' : 'bg-gray-100' %>"
+             style="height: <%= pct %>%"></div>
+        <div class="text-[9px] <%= isToday ? 'text-primary-600 font-bold' : 'text-gray-400' %> leading-tight">
+          <%= dayLabel.slice(0, 5) %>
+        </div>
+      </div>
+    <% }) %>
+  </div>
+</div>
+
+<!-- Hourly heatmap -->
+<div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+  <h2 class="text-sm font-semibold text-gray-700 mb-4">Giờ hoạt động trong ngày</h2>
+  <%
+    var maxHour = Math.max(1, ...hourlyData.map(h => h.messages));
+  %>
+  <div class="grid grid-cols-12 gap-1">
+    <% hourlyData.forEach(function(h) { %>
+      <%
+        var intensity = h.messages / maxHour;
+        var bg = 'bg-gray-50';
+        if (intensity > 0.75) bg = 'bg-primary-500 text-white';
+        else if (intensity > 0.5) bg = 'bg-primary-400 text-white';
+        else if (intensity > 0.25) bg = 'bg-primary-200';
+        else if (intensity > 0) bg = 'bg-primary-100';
+      %>
+      <div class="aspect-square rounded flex items-center justify-center text-[10px] <%= bg %>"
+           title="<%= h.hour %>:00 - <%= h.messages %> tin nhắn">
+        <%= h.hour %>
+      </div>
+    <% }) %>
+  </div>
+  <div class="flex items-center justify-end gap-2 mt-2 text-[10px] text-gray-400">
+    <span>Ít</span>
+    <span class="w-3 h-3 rounded bg-gray-50 border"></span>
+    <span class="w-3 h-3 rounded bg-primary-100"></span>
+    <span class="w-3 h-3 rounded bg-primary-200"></span>
+    <span class="w-3 h-3 rounded bg-primary-400"></span>
+    <span class="w-3 h-3 rounded bg-primary-500"></span>
+    <span>Nhiều</span>
+  </div>
+</div>
+
+<!-- Quick links -->
+<div class="flex items-center gap-3">
+  <a href="/device/<%= encodeURIComponent(device.mac_address) %>"
+     class="text-sm text-primary-500 hover:text-primary-700 transition">Xem lịch sử chat</a>
+  <span class="text-gray-300">|</span>
+  <a href="/device/<%= encodeURIComponent(device.mac_address) %>/settings"
+     class="text-sm text-purple-500 hover:text-purple-700 transition">Cài đặt AI</a>
+</div>
+
+<%- include('partials/footer') %>

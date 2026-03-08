@@ -139,8 +139,12 @@ app.get('/logout', (req, res) => {
 app.get('/dashboard', requireAuth, async (req, res) => {
   try {
     const [devices] = await pool.query(
-      `SELECT id, mac_address, alias, board, app_version, agent_id, last_connected_at
-       FROM ai_device WHERE user_id = ? ORDER BY last_connected_at DESC`,
+      `SELECT d.id, d.mac_address, d.alias, d.board, d.app_version,
+              d.agent_id, d.last_connected_at,
+              a.agent_name
+       FROM ai_device d
+       LEFT JOIN ai_agent a ON d.agent_id = a.id
+       WHERE d.user_id = ? ORDER BY d.last_connected_at DESC`,
       [req.session.userId]
     );
 
@@ -255,6 +259,88 @@ app.get('/history/:sessionId', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('History error:', err);
     res.status(500).render('error', { message: 'Failed to load chat history' });
+  }
+});
+
+app.get('/device/:mac/stats', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devRows] = await pool.query(
+      'SELECT id, mac_address, alias, board FROM ai_device WHERE mac_address = ? AND user_id = ?',
+      [mac, req.session.userId]
+    );
+    if (devRows.length === 0) return res.status(403).render('error', { message: 'Device not found' });
+    const device = devRows[0];
+
+    const [totals] = await pool.query(
+      `SELECT COUNT(DISTINCT session_id) AS total_sessions,
+              COUNT(*) AS total_messages,
+              SUM(chat_type = 1) AS student_messages,
+              SUM(chat_type = 2) AS ai_messages,
+              MIN(created_at) AS first_chat,
+              MAX(created_at) AS last_chat
+       FROM ai_agent_chat_history WHERE mac_address = ?`,
+      [mac]
+    );
+
+    const [daily] = await pool.query(
+      `SELECT DATE(created_at) AS day,
+              COUNT(DISTINCT session_id) AS sessions,
+              COUNT(*) AS messages,
+              SUM(chat_type = 1) AS student_msgs
+       FROM ai_agent_chat_history
+       WHERE mac_address = ? AND created_at >= DATE_SUB(CURDATE(), INTERVAL 13 DAY)
+       GROUP BY DATE(created_at)
+       ORDER BY day ASC`,
+      [mac]
+    );
+
+    const [hourly] = await pool.query(
+      `SELECT HOUR(created_at) AS hour, COUNT(*) AS messages
+       FROM ai_agent_chat_history
+       WHERE mac_address = ?
+       GROUP BY HOUR(created_at)
+       ORDER BY hour ASC`,
+      [mac]
+    );
+
+    const [avgDuration] = await pool.query(
+      `SELECT AVG(dur) AS avg_minutes FROM (
+         SELECT TIMESTAMPDIFF(MINUTE, MIN(created_at), MAX(created_at)) AS dur
+         FROM ai_agent_chat_history
+         WHERE mac_address = ?
+         GROUP BY session_id
+         HAVING COUNT(*) > 1
+       ) t`,
+      [mac]
+    );
+
+    const dailyMap = {};
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      dailyMap[key] = { day: key, sessions: 0, messages: 0, student_msgs: 0 };
+    }
+    for (const row of daily) {
+      const key = new Date(row.day).toISOString().slice(0, 10);
+      if (dailyMap[key]) dailyMap[key] = { ...dailyMap[key], ...row, day: key };
+    }
+    const dailyData = Object.values(dailyMap);
+
+    const hourlyData = Array.from({ length: 24 }, (_, i) => ({ hour: i, messages: 0 }));
+    for (const row of hourly) hourlyData[row.hour].messages = row.messages;
+
+    res.render('stats', {
+      username: req.session.username,
+      device,
+      totals: totals[0],
+      dailyData,
+      hourlyData,
+      avgMinutes: avgDuration[0]?.avg_minutes ? Math.round(avgDuration[0].avg_minutes) : 0,
+    });
+  } catch (err) {
+    console.error('Stats error:', err);
+    res.status(500).render('error', { message: 'Failed to load statistics' });
   }
 });
 
