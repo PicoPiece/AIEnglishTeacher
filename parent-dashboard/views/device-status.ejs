@@ -1,0 +1,175 @@
+<%- include('partials/header', { pageTitle: 'Trạng thái - ' + (device.alias || device.mac_address), username }) %>
+
+<div class="mb-4 flex items-center gap-2 text-sm text-gray-400">
+  <a href="/dashboard" class="hover:text-primary-500 transition">Dashboard</a>
+  <span>/</span>
+  <a href="/device/<%= encodeURIComponent(device.mac_address) %>" class="hover:text-primary-500 transition"><%= device.alias || device.mac_address %></a>
+  <span>/</span>
+  <span class="text-gray-600">Trạng thái</span>
+</div>
+
+<div class="flex items-center gap-3 mb-6">
+  <div class="w-12 h-12 rounded-xl flex items-center justify-center
+    <%= isOnline ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400' %>">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+    </svg>
+  </div>
+  <div>
+    <h1 class="text-xl font-bold text-gray-800"><%= device.alias || device.mac_address %></h1>
+    <div class="flex items-center gap-2 text-sm">
+      <span id="statusBadge" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+        <%= isOnline ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500' %>">
+        <span class="w-1.5 h-1.5 rounded-full <%= isOnline ? 'bg-green-500' : 'bg-gray-400' %>"></span>
+        <span id="statusText"><%= isOnline ? 'Online' : 'Offline' %></span>
+      </span>
+      <% if (device.agent_name) { %>
+        <span class="text-gray-400">|</span>
+        <span class="text-gray-500"><%= device.agent_name %></span>
+      <% } %>
+    </div>
+  </div>
+</div>
+
+<!-- Device Info -->
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+  <div class="bg-white rounded-xl shadow-sm border p-4">
+    <div class="text-xs text-gray-400 mb-1">Board</div>
+    <div class="text-sm font-semibold text-gray-700 truncate"><%= device.board || '---' %></div>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border p-4">
+    <div class="text-xs text-gray-400 mb-1">Firmware</div>
+    <div class="text-sm font-semibold text-gray-700"><%= device.app_version || '---' %></div>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border p-4">
+    <div class="text-xs text-gray-400 mb-1">Kết nối lần cuối</div>
+    <div class="text-sm font-semibold text-gray-700">
+      <% if (device.last_connected_at) { %>
+        <%= new Date(device.last_connected_at).toLocaleString('vi-VN') %>
+      <% } else { %>---<% } %>
+    </div>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border p-4">
+    <div class="text-xs text-gray-400 mb-1">MAC</div>
+    <div class="text-xs font-mono text-gray-500"><%= device.mac_address %></div>
+  </div>
+</div>
+
+<!-- Today Card -->
+<div class="bg-gradient-to-r from-primary-500 to-primary-600 rounded-xl shadow-sm p-5 mb-6 text-white">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold opacity-90">Hom nay</h2>
+    <span class="text-xs opacity-70" id="refreshTime"><%= new Date().toLocaleTimeString('vi-VN') %></span>
+  </div>
+  <div class="grid grid-cols-3 gap-4">
+    <div>
+      <div class="text-2xl font-bold" id="todaySessions"><%= today.sessions || 0 %></div>
+      <div class="text-xs opacity-75">Phien</div>
+    </div>
+    <div>
+      <div class="text-2xl font-bold" id="todayMessages"><%= today.messages || 0 %></div>
+      <div class="text-xs opacity-75">Tin nhan</div>
+    </div>
+    <div>
+      <div class="text-2xl font-bold" id="todayStudentMsgs"><%= today.student_msgs || 0 %></div>
+      <div class="text-xs opacity-75">Be noi</div>
+    </div>
+  </div>
+  <% if (lastTopic) { %>
+    <div class="mt-3 pt-3 border-t border-white/20">
+      <div class="text-xs opacity-70">Cau noi gan nhat:</div>
+      <div class="text-sm mt-1 italic opacity-90">"<%= lastTopic.substring(0, 100) %>"</div>
+    </div>
+  <% } %>
+</div>
+
+<!-- All-time Stats -->
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+  <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+    <div class="text-2xl font-bold text-primary-600"><%= totals.total_sessions || 0 %></div>
+    <div class="text-xs text-gray-400 mt-1">Tong phien</div>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+    <div class="text-2xl font-bold text-green-600"><%= totals.student_messages || 0 %></div>
+    <div class="text-xs text-gray-400 mt-1">Luot be noi</div>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+    <div class="text-2xl font-bold text-blue-600"><%= totals.ai_messages || 0 %></div>
+    <div class="text-xs text-gray-400 mt-1">Luot AI</div>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border p-4 text-center">
+    <div class="text-2xl font-bold text-purple-600"><%= totals.total_messages || 0 %></div>
+    <div class="text-xs text-gray-400 mt-1">Tong tin nhan</div>
+  </div>
+</div>
+
+<!-- Music & Content Stats -->
+<div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+  <h2 class="text-sm font-semibold text-gray-700 mb-3">Noi dung hoc tap</h2>
+  <div class="grid grid-cols-3 gap-4">
+    <div class="text-center">
+      <div class="text-lg font-bold text-pink-500"><%= musicStats.total_songs || 0 %></div>
+      <div class="text-xs text-gray-400">Bai nhac</div>
+    </div>
+    <div class="text-center">
+      <div class="text-lg font-bold text-indigo-500"><%= playlistStats.total_playlists || 0 %></div>
+      <div class="text-xs text-gray-400">Playlist</div>
+    </div>
+    <div class="text-center">
+      <div class="text-lg font-bold text-amber-500"><%= scheduleStats.active_schedules || 0 %></div>
+      <div class="text-xs text-gray-400">Lich phat</div>
+    </div>
+  </div>
+</div>
+
+<!-- Quick Links -->
+<div class="flex flex-wrap items-center gap-3 mb-6">
+  <a href="/device/<%= encodeURIComponent(device.mac_address) %>"
+     class="bg-white border rounded-lg px-4 py-2 text-sm text-gray-600 hover:border-primary-300 hover:text-primary-600 transition">
+    Lich su chat
+  </a>
+  <a href="/device/<%= encodeURIComponent(device.mac_address) %>/stats"
+     class="bg-white border rounded-lg px-4 py-2 text-sm text-gray-600 hover:border-blue-300 hover:text-blue-600 transition">
+    Thong ke chi tiet
+  </a>
+  <a href="/device/<%= encodeURIComponent(device.mac_address) %>/settings"
+     class="bg-white border rounded-lg px-4 py-2 text-sm text-gray-600 hover:border-purple-300 hover:text-purple-600 transition">
+    Cai dat AI
+  </a>
+  <a href="/music"
+     class="bg-white border rounded-lg px-4 py-2 text-sm text-gray-600 hover:border-pink-300 hover:text-pink-600 transition">
+    Thu vien nhac
+  </a>
+</div>
+
+<script>
+(function() {
+  const mac = '<%= device.mac_address %>';
+  setInterval(async () => {
+    try {
+      const resp = await fetch('/api/device/' + encodeURIComponent(mac) + '/status');
+      if (!resp.ok) return;
+      const data = await resp.json();
+
+      const badge = document.getElementById('statusBadge');
+      const text = document.getElementById('statusText');
+      if (data.isOnline) {
+        badge.className = badge.className.replace(/bg-gray-100 text-gray-500/g, 'bg-green-100 text-green-700');
+        text.textContent = 'Online';
+      } else {
+        badge.className = badge.className.replace(/bg-green-100 text-green-700/g, 'bg-gray-100 text-gray-500');
+        text.textContent = 'Offline';
+      }
+
+      if (data.today) {
+        document.getElementById('todaySessions').textContent = data.today.sessions || 0;
+        document.getElementById('todayMessages').textContent = data.today.messages || 0;
+        document.getElementById('todayStudentMsgs').textContent = data.today.student_msgs || 0;
+      }
+      document.getElementById('refreshTime').textContent = new Date().toLocaleTimeString('vi-VN');
+    } catch (e) {}
+  }, 30000);
+})();
+</script>
+
+<%- include('partials/footer') %>

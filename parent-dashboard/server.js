@@ -464,6 +464,168 @@ app.post('/device/:mac/settings', requireAuth, async (req, res) => {
 });
 
 // ===========================================
+// Phase 3: Device Status & Daily Summary
+// ===========================================
+
+app.get('/device/:mac/status', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devRows] = await pool.query(
+      `SELECT d.id, d.mac_address, d.alias, d.board, d.app_version,
+              d.agent_id, d.last_connected_at, a.agent_name
+       FROM ai_device d
+       LEFT JOIN ai_agent a ON d.agent_id = a.id
+       WHERE d.mac_address = ? AND d.user_id = ?`,
+      [mac, req.session.userId]
+    );
+    if (devRows.length === 0) return res.status(403).render('error', { message: 'Device not found' });
+    const device = devRows[0];
+
+    const isOnline = device.last_connected_at &&
+      (Date.now() - new Date(device.last_connected_at).getTime()) < 5 * 60 * 1000;
+
+    const [totals] = await pool.query(
+      `SELECT COUNT(DISTINCT session_id) AS total_sessions,
+              COUNT(*) AS total_messages,
+              SUM(chat_type = 1) AS student_messages,
+              SUM(chat_type = 2) AS ai_messages
+       FROM ai_agent_chat_history WHERE mac_address = ?`,
+      [mac]
+    );
+
+    const [todayStats] = await pool.query(
+      `SELECT COUNT(DISTINCT session_id) AS sessions,
+              COUNT(*) AS messages,
+              SUM(chat_type = 1) AS student_msgs,
+              MIN(created_at) AS first_msg,
+              MAX(created_at) AS last_msg
+       FROM ai_agent_chat_history
+       WHERE mac_address = ? AND DATE(created_at) = CURDATE()`,
+      [mac]
+    );
+
+    const [musicStats] = await pool.query(
+      `SELECT COUNT(*) AS total_songs FROM parent_music WHERE user_id = ? OR user_id = 'system'`,
+      [req.session.userId]
+    );
+    const [playlistStats] = await pool.query(
+      'SELECT COUNT(*) AS total_playlists FROM parent_playlist WHERE user_id = ?',
+      [req.session.userId]
+    );
+    const [scheduleStats] = await pool.query(
+      'SELECT COUNT(*) AS active_schedules FROM parent_play_schedule WHERE user_id = ? AND is_active = 1',
+      [req.session.userId]
+    );
+
+    const [lastTopic] = await pool.query(
+      `SELECT content FROM ai_agent_chat_history
+       WHERE mac_address = ? AND chat_type = 1 AND DATE(created_at) = CURDATE()
+       ORDER BY created_at DESC LIMIT 1`,
+      [mac]
+    );
+
+    res.render('device-status', {
+      username: req.session.username,
+      device,
+      isOnline,
+      totals: totals[0],
+      today: todayStats[0],
+      musicStats: musicStats[0],
+      playlistStats: playlistStats[0],
+      scheduleStats: scheduleStats[0],
+      lastTopic: lastTopic.length > 0 ? lastTopic[0].content : null,
+    });
+  } catch (err) {
+    console.error('Device status error:', err);
+    res.status(500).render('error', { message: 'Failed to load device status' });
+  }
+});
+
+app.get('/api/device/:mac/status', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devRows] = await pool.query(
+      `SELECT d.last_connected_at, d.app_version, a.agent_name
+       FROM ai_device d LEFT JOIN ai_agent a ON d.agent_id = a.id
+       WHERE d.mac_address = ? AND d.user_id = ?`,
+      [mac, req.session.userId]
+    );
+    if (devRows.length === 0) return res.status(403).json({ error: 'Not found' });
+    const dev = devRows[0];
+    const isOnline = dev.last_connected_at &&
+      (Date.now() - new Date(dev.last_connected_at).getTime()) < 5 * 60 * 1000;
+
+    const [todayStats] = await pool.query(
+      `SELECT COUNT(DISTINCT session_id) AS sessions,
+              COUNT(*) AS messages,
+              SUM(chat_type = 1) AS student_msgs
+       FROM ai_agent_chat_history
+       WHERE mac_address = ? AND DATE(created_at) = CURDATE()`,
+      [mac]
+    );
+
+    res.json({
+      isOnline,
+      lastConnected: dev.last_connected_at,
+      appVersion: dev.app_version,
+      agentName: dev.agent_name,
+      today: todayStats[0],
+    });
+  } catch (err) {
+    console.error('API status error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/device/:mac/daily-summary', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devCheck] = await pool.query(
+      'SELECT id FROM ai_device WHERE mac_address = ? AND user_id = ?',
+      [mac, req.session.userId]
+    );
+    if (devCheck.length === 0) return res.status(403).json({ error: 'Not found' });
+
+    const [today] = await pool.query(
+      `SELECT COUNT(DISTINCT session_id) AS sessions,
+              COUNT(*) AS messages,
+              SUM(chat_type = 1) AS student_msgs,
+              SUM(chat_type = 2) AS ai_msgs,
+              MIN(created_at) AS first_msg,
+              MAX(created_at) AS last_msg
+       FROM ai_agent_chat_history
+       WHERE mac_address = ? AND DATE(created_at) = CURDATE()`,
+      [mac]
+    );
+
+    const [lastWords] = await pool.query(
+      `SELECT content FROM ai_agent_chat_history
+       WHERE mac_address = ? AND chat_type = 1 AND DATE(created_at) = CURDATE()
+       ORDER BY created_at DESC LIMIT 3`,
+      [mac]
+    );
+
+    const t = today[0];
+    let activeMinutes = 0;
+    if (t.first_msg && t.last_msg) {
+      activeMinutes = Math.round((new Date(t.last_msg) - new Date(t.first_msg)) / 60000);
+    }
+
+    res.json({
+      sessions: t.sessions || 0,
+      messages: t.messages || 0,
+      studentMessages: t.student_msgs || 0,
+      aiMessages: t.ai_msgs || 0,
+      activeMinutes,
+      recentWords: lastWords.map(w => w.content),
+    });
+  } catch (err) {
+    console.error('Daily summary error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===========================================
 // Phase 2: Music & Playlist routes
 // ===========================================
 
@@ -480,8 +642,8 @@ const MUSIC_CATEGORIES = [
 app.get('/music', requireAuth, async (req, res) => {
   try {
     const cat = req.query.category || '';
-    let query = 'SELECT * FROM parent_music WHERE user_id = ?';
-    const params = [req.session.userId];
+    let query = 'SELECT * FROM parent_music WHERE (user_id = ? OR user_id = ?)';
+    const params = [req.session.userId, 'system'];
     if (cat) { query += ' AND category = ?'; params.push(cat); }
     query += ' ORDER BY sort_order ASC, created_at DESC';
     const [songs] = await pool.query(query, params);
@@ -549,8 +711,8 @@ app.post('/music/:id/delete', requireAuth, async (req, res) => {
 app.get('/api/music/stream/:id', requireAuth, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT filename, original_name FROM parent_music WHERE id = ? AND user_id = ?',
-      [req.params.id, req.session.userId]
+      'SELECT filename, original_name FROM parent_music WHERE id = ? AND (user_id = ? OR user_id = ?)',
+      [req.params.id, req.session.userId, 'system']
     );
     if (rows.length === 0) return res.status(404).send('Not found');
     const filepath = path.join(MUSIC_DIR, rows[0].filename);
@@ -640,8 +802,8 @@ app.get('/playlists/:id', requireAuth, async (req, res) => {
     );
 
     const [allSongs] = await pool.query(
-      'SELECT id, title, artist, category FROM parent_music WHERE user_id = ? ORDER BY title ASC',
-      [req.session.userId]
+      'SELECT id, title, artist, category FROM parent_music WHERE (user_id = ? OR user_id = ?) ORDER BY title ASC',
+      [req.session.userId, 'system']
     );
 
     const inPlaylist = new Set(items.map(i => i.id));
