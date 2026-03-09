@@ -196,6 +196,54 @@ docker restart xiaozhi-esp32-server
 | 18 | Delete on dashboard → check server | File removed from both dashboard DB and server music dir | |
 | 19 | File naming | Server sees readable filename matching song title | |
 
+## Pre-loaded Content (Task 2.6)
+
+76 starter audio files generated with EdgeTTS (`en-US-AriaNeural`):
+
+| Category | Count | Content |
+|----------|-------|---------|
+| Phonics | 26 | A-Z, letter + sound + example word |
+| Numbers | 20 | 1-20, number + spelling |
+| Dinosaurs vocab | 10 | Word + sentence + "Can you say...?" |
+| Space vocab | 10 | Word + sentence + "Can you say...?" |
+| Animals vocab | 10 | Word + sentence + "Can you say...?" |
+
+Script: `parent-dashboard/scripts/generate-starter-content.js`
+
+```bash
+docker exec -e DB_HOST=xiaozhi-esp32-server-db \
+  -e DB_USER=parent_reader -e DB_PASS=parent_readonly_pass \
+  -e DB_NAME=xiaozhi_esp32_server -e MUSIC_DIR=/data/music \
+  parent-dashboard node /app/scripts/generate-starter-content.js
+```
+
+Files are stored with `user_id = 'system'` and visible to all users.
+
+## Device Status Dashboard (Phase 3)
+
+### Status Page: `/device/:mac/status`
+
+Shows real-time device info with 30-second auto-refresh:
+- Connection status (Online/Offline from `last_connected_at`)
+- Device info (board, firmware, MAC, agent)
+- Today's learning summary (sessions, messages, student messages)
+- All-time totals
+- Music library stats (songs, playlists, schedules)
+- Last spoken sentence by child
+
+### API Endpoints
+
+- `GET /api/device/:mac/status` — JSON: isOnline, today stats
+- `GET /api/device/:mac/daily-summary` — JSON: sessions, messages, active minutes, recent words
+
+## Single-Turn Listen Mode (Firmware)
+
+Changed `GetDefaultListeningMode()` in `main/application.cc` to return `kListeningModeManualStop`.
+
+**Behavior:** After AI finishes speaking, device goes to Idle. Child reads screen, thinks, then presses BOOT button to speak again. No auto-listen.
+
+**Repo:** `https://github.com/PicoPiece/AIEnglishTeacherXiaozhiFw` branch `hdang/PicoAIEng`
+
 ## Known Issues & Limitations
 
 1. **Playlist selection not integrated with plugin** — The `play_music` plugin plays from the entire music directory, not from a specific playlist. Playlist management on dashboard is for future scheduled playback.
@@ -213,6 +261,7 @@ docker restart xiaozhi-esp32-server
 | `006-fix-intent-clean.sql` | Switch to `Intent_function_call` | If using `Intent_intent_llm` |
 | `008-fix-english-only.sql` | Enforce English-only in prompt | Initial setup |
 | `010-clear-memory.sql` | Reset Chinese summary_memory to English | When memory drifts to Chinese |
+| `011-system-content.sql` | Grant permissions for system shared content | Before running generate script |
 
 ## Dev Notes
 
