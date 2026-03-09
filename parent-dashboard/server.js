@@ -59,7 +59,7 @@ const upload = multer({
     const ext = path.extname(file.originalname).toLowerCase();
     cb(null, allowed.includes(ext));
   },
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 },
 });
 
 // --- Prompt builder helpers ---
@@ -485,7 +485,17 @@ app.get('/music', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/music/upload', requireAuth, upload.array('files', 20), async (req, res) => {
+app.post('/music/upload', requireAuth, (req, res, next) => {
+  upload.array('files', 20)(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).render('error', { message: 'File quá lớn! Tối đa 100MB mỗi file.' });
+      }
+      return res.status(400).render('error', { message: 'Upload lỗi: ' + err.message });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     const category = req.body.category || 'general';
     for (const file of (req.files || [])) {

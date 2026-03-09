@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   parent-dashboard:
     build: .
@@ -15,6 +13,9 @@ services:
       - DB_NAME=xiaozhi_esp32_server
       - SESSION_SECRET=aiteacher-parent-session-2026
       - PORT=8005
+      - MUSIC_DIR=/data/music
+    volumes:
+      - /home/picopiece/xiaozhi-server/music:/data/music
     networks:
       - xiaozhi-network
 
