@@ -45,13 +45,26 @@ function requireAuth(req, res, next) {
 const MUSIC_DIR = process.env.MUSIC_DIR || path.join(__dirname, 'data', 'music');
 if (!fs.existsSync(MUSIC_DIR)) fs.mkdirSync(MUSIC_DIR, { recursive: true });
 
+function sanitizeFilename(name) {
+  return name
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 120) || 'untitled';
+}
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, MUSIC_DIR),
     filename: (req, file, cb) => {
-      const unique = Date.now() + '-' + Math.round(Math.random() * 1e6);
       const ext = path.extname(file.originalname) || '.mp3';
-      cb(null, unique + ext);
+      const baseName = req.body.title
+        ? sanitizeFilename(req.body.title)
+        : sanitizeFilename(path.basename(file.originalname, ext));
+      const stamp = Date.now().toString(36);
+      const finalName = `${baseName}_${stamp}${ext}`;
+      cb(null, finalName);
     },
   }),
   fileFilter: (req, file, cb) => {
