@@ -41,6 +41,17 @@ function requireAuth(req, res, next) {
   next();
 }
 
+function requireAdmin(req, res, next) {
+  if (!req.session.userId) return res.redirect('/login');
+  if (!req.session.superAdmin) return res.status(403).render('error', { message: 'Chỉ admin mới có quyền truy cập.' });
+  next();
+}
+
+app.use((req, res, next) => {
+  res.locals.superAdmin = req.session.superAdmin || false;
+  next();
+});
+
 // --- Music file upload ---
 const MUSIC_DIR = process.env.MUSIC_DIR || path.join(__dirname, 'data', 'music');
 if (!fs.existsSync(MUSIC_DIR)) fs.mkdirSync(MUSIC_DIR, { recursive: true });
@@ -132,7 +143,7 @@ app.post('/login', async (req, res) => {
   }
   try {
     const [rows] = await pool.query(
-      'SELECT id, username, password, status FROM sys_user WHERE username = ?',
+      'SELECT id, username, password, status, super_admin FROM sys_user WHERE username = ?',
       [username]
     );
     if (rows.length === 0) {
@@ -161,6 +172,7 @@ app.post('/login', async (req, res) => {
 
     req.session.userId = String(user.id);
     req.session.username = user.username;
+    req.session.superAdmin = (user.super_admin === 1);
     res.redirect('/dashboard');
   } catch (err) {
     console.error('Login error:', err);
@@ -943,6 +955,216 @@ app.post('/schedules/:id/delete', requireAuth, async (req, res) => {
     res.status(500).render('error', { message: 'Failed to delete schedule' });
   }
 });
+
+
+// ===========================================
+// Admin Panel routes
+// ===========================================
+
+const crypto = require('crypto');
+
+const TEMPLATE_AGENT_ID = '364609f2c11d489f9dd9e561df3d0568';
+
+function generateId() {
+  const ts = BigInt(Date.now()) << 22n;
+  const rand = BigInt(Math.floor(Math.random() * 4194304));
+  return (ts | rand).toString();
+}
+
+function generateUUID() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+app.get('/admin', requireAdmin, async (req, res) => {
+  try {
+    const [parents] = await pool.query(
+      `SELECT u.id, u.username, u.status, u.create_date,
+              COUNT(d.id) AS device_count
+       FROM sys_user u
+       LEFT JOIN ai_device d ON d.user_id = u.id
+       WHERE u.super_admin = 0
+       GROUP BY u.id
+       ORDER BY u.create_date DESC`
+    );
+
+    const [devices] = await pool.query(
+      `SELECT d.id, d.mac_address, d.alias, d.agent_id, d.user_id,
+              d.last_connected_at, d.board, d.app_version,
+              a.agent_name,
+              u.username AS owner_name
+       FROM ai_device d
+       LEFT JOIN ai_agent a ON d.agent_id = a.id
+       LEFT JOIN sys_user u ON d.user_id = u.id
+       ORDER BY d.create_date DESC`
+    );
+
+    const [agents] = await pool.query(
+      `SELECT a.id, a.agent_name, COUNT(d.id) AS device_count
+       FROM ai_agent a
+       LEFT JOIN ai_device d ON d.agent_id = a.id
+       GROUP BY a.id
+       ORDER BY a.agent_name`
+    );
+
+    res.render('admin', {
+      username: req.session.username,
+      parents,
+      devices,
+      agents,
+      success: req.query.success === '1' ? 'Thao tác thành công!' : null,
+      error: req.query.error || null,
+    });
+  } catch (err) {
+    console.error('Admin dashboard error:', err);
+    res.status(500).render('error', { message: 'Failed to load admin panel' });
+  }
+});
+
+app.post('/admin/parents', requireAdmin, async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.redirect('/admin?error=' + encodeURIComponent('Username và password không được để trống'));
+    }
+
+    const [existing] = await pool.query('SELECT id FROM sys_user WHERE username = ?', [username.trim()]);
+    if (existing.length > 0) {
+      return res.redirect('/admin?error=' + encodeURIComponent('Username đã tồn tại'));
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+    const id = generateId();
+
+    await pool.query(
+      `INSERT INTO sys_user (id, username, password, super_admin, status, creator, create_date, updater, update_date)
+       VALUES (?, ?, ?, 0, 1, ?, NOW(), ?, NOW())`,
+      [id, username.trim(), hash, req.session.userId, req.session.userId]
+    );
+
+    res.redirect('/admin?success=1');
+  } catch (err) {
+    console.error('Create parent error:', err);
+    res.redirect('/admin?error=' + encodeURIComponent('Lỗi tạo tài khoản: ' + err.message));
+  }
+});
+
+app.post('/admin/devices/:mac/assign', requireAdmin, async (req, res) => {
+  try {
+    const { user_id } = req.body;
+    const mac = req.params.mac;
+    await pool.query('UPDATE ai_device SET user_id = ? WHERE mac_address = ?', [user_id, mac]);
+    res.redirect('/admin?success=1');
+  } catch (err) {
+    console.error('Assign device error:', err);
+    res.redirect('/admin?error=' + encodeURIComponent('Lỗi gán thiết bị: ' + err.message));
+  }
+});
+
+app.post('/admin/devices/:mac/create-agent', requireAdmin, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const agentName = (req.body.agent_name || '').trim() || 'EnglishTeacher';
+
+    const [template] = await pool.query(
+      'SELECT system_prompt, chat_history_conf FROM ai_agent WHERE id = ?',
+      [TEMPLATE_AGENT_ID]
+    );
+    const systemPrompt = template.length > 0 ? template[0].system_prompt : DEFAULT_CORE_INSTRUCTIONS;
+    const chatHistoryConf = template.length > 0 ? template[0].chat_history_conf : 1;
+
+    const newId = generateUUID();
+    await pool.query(
+      `INSERT INTO ai_agent (id, agent_name, system_prompt, chat_history_conf)
+       VALUES (?, ?, ?, ?)`,
+      [newId, agentName, systemPrompt, chatHistoryConf]
+    );
+
+    await pool.query('UPDATE ai_device SET agent_id = ? WHERE mac_address = ?', [newId, mac]);
+
+    res.redirect('/admin?success=1');
+  } catch (err) {
+    console.error('Create agent error:', err);
+    res.redirect('/admin?error=' + encodeURIComponent('Lỗi tạo agent: ' + err.message));
+  }
+});
+
+app.post('/admin/devices/:mac/assign-agent', requireAdmin, async (req, res) => {
+  try {
+    const { agent_id } = req.body;
+    const mac = req.params.mac;
+    await pool.query('UPDATE ai_device SET agent_id = ? WHERE mac_address = ?', [agent_id, mac]);
+    res.redirect('/admin?success=1');
+  } catch (err) {
+    console.error('Assign agent error:', err);
+    res.redirect('/admin?error=' + encodeURIComponent('Lỗi gán agent: ' + err.message));
+  }
+});
+
+app.post('/admin/quick-setup', requireAdmin, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const { mac_address, parent_mode, parent_id, parent_username, parent_password, agent_name } = req.body;
+
+    if (!mac_address) {
+      await conn.rollback();
+      return res.redirect('/admin?error=' + encodeURIComponent('Chưa chọn thiết bị'));
+    }
+
+    let userId = parent_id;
+
+    if (parent_mode === 'new') {
+      if (!parent_username || !parent_password) {
+        await conn.rollback();
+        return res.redirect('/admin?error=' + encodeURIComponent('Username và password không được để trống'));
+      }
+      const [existing] = await conn.query('SELECT id FROM sys_user WHERE username = ?', [parent_username.trim()]);
+      if (existing.length > 0) {
+        await conn.rollback();
+        return res.redirect('/admin?error=' + encodeURIComponent('Username đã tồn tại'));
+      }
+
+      const hash = await bcrypt.hash(parent_password, 10);
+      userId = generateId();
+      await conn.query(
+        `INSERT INTO sys_user (id, username, password, super_admin, status, creator, create_date, updater, update_date)
+         VALUES (?, ?, ?, 0, 1, ?, NOW(), ?, NOW())`,
+        [userId, parent_username.trim(), hash, req.session.userId, req.session.userId]
+      );
+    }
+
+    const [template] = await conn.query(
+      'SELECT system_prompt, chat_history_conf FROM ai_agent WHERE id = ?',
+      [TEMPLATE_AGENT_ID]
+    );
+    const systemPrompt = template.length > 0 ? template[0].system_prompt : DEFAULT_CORE_INSTRUCTIONS;
+    const chatHistoryConf = template.length > 0 ? template[0].chat_history_conf : 1;
+
+    const newAgentId = generateUUID();
+    const finalAgentName = (agent_name || '').trim() || 'EnglishTeacher';
+    await conn.query(
+      `INSERT INTO ai_agent (id, agent_name, system_prompt, chat_history_conf)
+       VALUES (?, ?, ?, ?)`,
+      [newAgentId, finalAgentName, systemPrompt, chatHistoryConf]
+    );
+
+    await conn.query(
+      'UPDATE ai_device SET user_id = ?, agent_id = ? WHERE mac_address = ?',
+      [userId, newAgentId, mac_address]
+    );
+
+    await conn.commit();
+    res.redirect('/admin?success=1');
+  } catch (err) {
+    await conn.rollback();
+    console.error('Quick setup error:', err);
+    res.redirect('/admin?error=' + encodeURIComponent('Lỗi quick setup: ' + err.message));
+  } finally {
+    conn.release();
+  }
+});
+
 
 // --- Start ---
 app.listen(PORT, '0.0.0.0', () => {

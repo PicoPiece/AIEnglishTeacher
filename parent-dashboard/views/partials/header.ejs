@@ -29,6 +29,9 @@
           <a href="/music" class="opacity-80 hover:opacity-100 transition">Nhạc</a>
           <a href="/playlists" class="opacity-80 hover:opacity-100 transition">Playlist</a>
           <a href="/schedules" class="opacity-80 hover:opacity-100 transition">Lịch phát</a>
+          <% if (typeof superAdmin !== 'undefined' && superAdmin) { %>
+            <a href="/admin" class="opacity-80 hover:opacity-100 transition font-medium">Quản trị</a>
+          <% } %>
           <span class="opacity-50">|</span>
           <span class="opacity-60"><%= username %></span>
           <a href="/logout" class="bg-primary-500 hover:bg-primary-400 px-3 py-1 rounded transition">Logout</a>

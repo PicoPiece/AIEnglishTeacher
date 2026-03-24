@@ -13,6 +13,11 @@ GRANT SELECT ON xiaozhi_esp32_server.ai_agent_chat_history TO 'parent_reader'@'%
 -- Allow parent to update only the system_prompt column (for prompt customization)
 GRANT UPDATE (system_prompt) ON xiaozhi_esp32_server.ai_agent TO 'parent_reader'@'%';
 
+-- Admin operations: manage users, devices, agents
+GRANT INSERT, UPDATE ON xiaozhi_esp32_server.sys_user TO 'parent_reader'@'%';
+GRANT UPDATE (user_id, agent_id, alias) ON xiaozhi_esp32_server.ai_device TO 'parent_reader'@'%';
+GRANT INSERT, UPDATE ON xiaozhi_esp32_server.ai_agent TO 'parent_reader'@'%';
+
 -- Full access to parent-owned music/playlist/schedule tables
 GRANT ALL ON xiaozhi_esp32_server.parent_music TO 'parent_reader'@'%';
 GRANT ALL ON xiaozhi_esp32_server.parent_playlist TO 'parent_reader'@'%';

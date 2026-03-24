@@ -1,0 +1,290 @@
+<%- include('partials/header', { pageTitle: 'Quản trị', username: username }) %>
+
+<h1 class="text-2xl font-bold text-gray-800 mb-6">Quản trị hệ thống</h1>
+
+<% if (success) { %>
+  <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4">
+    <%= success %>
+  </div>
+<% } %>
+<% if (error) { %>
+  <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+    <%= error %>
+  </div>
+<% } %>
+
+<%
+  var unassignedDevices = devices.filter(function(d) { return !d.user_id || !d.agent_id; });
+  var allDevicesForSetup = devices;
+%>
+
+<!-- Quick Setup -->
+<section class="mb-8">
+  <div class="bg-gradient-to-r from-primary-50 to-accent-50 rounded-xl border-2 border-primary-200 p-6">
+    <h2 class="text-lg font-bold text-primary-700 mb-1">Thiết lập nhanh</h2>
+    <p class="text-sm text-gray-500 mb-4">Gán thiết bị cho phụ huynh + tạo agent mới trong 1 bước</p>
+
+    <form action="/admin/quick-setup" method="POST">
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4">
+        <!-- Device -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Thiết bị</label>
+          <select name="mac_address" required
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none">
+            <option value="">-- Chọn thiết bị --</option>
+            <% allDevicesForSetup.forEach(function(d) { %>
+              <option value="<%= d.mac_address %>">
+                <%= d.alias || d.mac_address %> <% if (d.owner_name) { %>(owner: <%= d.owner_name %>)<% } else { %>(chưa gán)<% } %>
+              </option>
+            <% }) %>
+          </select>
+        </div>
+
+        <!-- Parent mode -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Phụ huynh</label>
+          <select name="parent_mode" id="parentMode" onchange="toggleParentFields()"
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none">
+            <option value="new">Tạo mới</option>
+            <option value="existing">Chọn có sẵn</option>
+          </select>
+        </div>
+
+        <!-- Agent name -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Tên Agent</label>
+          <input type="text" name="agent_name" placeholder="VD: AI cho bé Minh"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none">
+        </div>
+      </div>
+
+      <!-- New parent fields -->
+      <div id="newParentFields" class="grid gap-4 sm:grid-cols-2 mb-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Username mới</label>
+          <input type="text" name="parent_username" placeholder="VD: parent_minh"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+          <input type="password" name="parent_password" placeholder="Mật khẩu"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none">
+        </div>
+      </div>
+
+      <!-- Existing parent field -->
+      <div id="existingParentField" class="mb-4 hidden">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Chọn phụ huynh</label>
+        <select name="parent_id"
+                class="w-full sm:w-1/2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none">
+          <option value="">-- Chọn --</option>
+          <% parents.forEach(function(p) { %>
+            <option value="<%= p.id %>"><%= p.username %></option>
+          <% }) %>
+        </select>
+      </div>
+
+      <button type="submit"
+              class="bg-primary-500 hover:bg-primary-600 text-white font-medium px-6 py-2 rounded-lg transition shadow-sm">
+        Thiết lập nhanh
+      </button>
+    </form>
+  </div>
+</section>
+
+<!-- Parents -->
+<section class="mb-8">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-lg font-semibold text-gray-700">Phụ huynh (<%= parents.length %>)</h2>
+    <button onclick="document.getElementById('newParentForm').classList.toggle('hidden')"
+            class="text-sm bg-primary-500 hover:bg-primary-600 text-white px-3 py-1.5 rounded-lg transition">
+      + Tạo mới
+    </button>
+  </div>
+
+  <!-- Inline create form -->
+  <div id="newParentForm" class="hidden bg-white rounded-xl shadow-sm border p-4 mb-4">
+    <form action="/admin/parents" method="POST" class="flex items-end gap-3 flex-wrap">
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Username</label>
+        <input type="text" name="username" required placeholder="VD: parent_01"
+               class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Password</label>
+        <input type="password" name="password" required placeholder="Mật khẩu"
+               class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none">
+      </div>
+      <button type="submit"
+              class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm transition">
+        Tạo
+      </button>
+    </form>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+    <% if (parents.length === 0) { %>
+      <div class="p-6 text-center text-gray-400">Chưa có phụ huynh nào.</div>
+    <% } else { %>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 border-b">
+            <tr>
+              <th class="px-4 py-3 text-left font-medium text-gray-600">Username</th>
+              <th class="px-4 py-3 text-left font-medium text-gray-600">Thiết bị</th>
+              <th class="px-4 py-3 text-left font-medium text-gray-600">Trạng thái</th>
+              <th class="px-4 py-3 text-left font-medium text-gray-600">Ngày tạo</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y">
+            <% parents.forEach(function(p) { %>
+              <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3 font-medium text-gray-800"><%= p.username %></td>
+                <td class="px-4 py-3">
+                  <span class="bg-primary-100 text-primary-700 text-xs font-medium px-2 py-0.5 rounded-full">
+                    <%= p.device_count %> thiết bị
+                  </span>
+                </td>
+                <td class="px-4 py-3">
+                  <% if (p.status === 1) { %>
+                    <span class="inline-flex items-center gap-1 text-green-600 text-xs">
+                      <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span> Hoạt động
+                    </span>
+                  <% } else { %>
+                    <span class="inline-flex items-center gap-1 text-gray-400 text-xs">
+                      <span class="w-1.5 h-1.5 bg-gray-300 rounded-full"></span> Tắt
+                    </span>
+                  <% } %>
+                </td>
+                <td class="px-4 py-3 text-gray-500 text-xs">
+                  <%= p.create_date ? new Date(p.create_date).toLocaleDateString('vi-VN') : '-' %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+</section>
+
+<!-- Devices -->
+<section class="mb-8">
+  <h2 class="text-lg font-semibold text-gray-700 mb-3">Thiết bị (<%= devices.length %>)</h2>
+
+  <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+    <% if (devices.length === 0) { %>
+      <div class="p-6 text-center text-gray-400">Chưa có thiết bị nào.</div>
+    <% } else { %>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 border-b">
+            <tr>
+              <th class="px-4 py-3 text-left font-medium text-gray-600">Thiết bị</th>
+              <th class="px-4 py-3 text-left font-medium text-gray-600">Phụ huynh</th>
+              <th class="px-4 py-3 text-left font-medium text-gray-600">Agent</th>
+              <th class="px-4 py-3 text-left font-medium text-gray-600">Kết nối</th>
+              <th class="px-4 py-3 text-left font-medium text-gray-600">Hành động</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y">
+            <% devices.forEach(function(d) {
+              var now = Date.now();
+              var last = d.last_connected_at ? new Date(d.last_connected_at).getTime() : 0;
+              var diffMin = last ? Math.floor((now - last) / 60000) : 99999;
+              var isOnline = diffMin < 5;
+            %>
+              <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3">
+                  <div class="font-medium text-gray-800"><%= d.alias || d.mac_address %></div>
+                  <div class="text-xs text-gray-400"><%= d.mac_address %></div>
+                </td>
+                <td class="px-4 py-3">
+                  <% if (d.owner_name) { %>
+                    <span class="text-gray-700"><%= d.owner_name %></span>
+                  <% } else { %>
+                    <span class="text-orange-500 text-xs font-medium">Chưa gán</span>
+                  <% } %>
+
+                  <!-- Assign parent form -->
+                  <form action="/admin/devices/<%= encodeURIComponent(d.mac_address) %>/assign" method="POST"
+                        class="mt-1 flex items-center gap-1">
+                    <select name="user_id" class="text-xs border border-gray-200 rounded px-1.5 py-1 w-28">
+                      <option value="">-- Chọn --</option>
+                      <% parents.forEach(function(p) { %>
+                        <option value="<%= p.id %>" <%= String(d.user_id) === String(p.id) ? 'selected' : '' %>><%= p.username %></option>
+                      <% }) %>
+                    </select>
+                    <button type="submit" class="text-xs bg-primary-500 hover:bg-primary-600 text-white px-2 py-1 rounded transition">
+                      Gán
+                    </button>
+                  </form>
+                </td>
+                <td class="px-4 py-3">
+                  <% if (d.agent_name) { %>
+                    <span class="text-gray-700 text-xs"><%= d.agent_name %></span>
+                  <% } else { %>
+                    <span class="text-orange-500 text-xs font-medium">Chưa có</span>
+                  <% } %>
+
+                  <!-- Create or assign agent -->
+                  <div class="mt-1 flex flex-col gap-1">
+                    <form action="/admin/devices/<%= encodeURIComponent(d.mac_address) %>/create-agent" method="POST"
+                          class="flex items-center gap-1">
+                      <input type="text" name="agent_name" placeholder="Tên agent"
+                             class="text-xs border border-gray-200 rounded px-1.5 py-1 w-24">
+                      <button type="submit" class="text-xs bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded transition whitespace-nowrap">
+                        + Tạo
+                      </button>
+                    </form>
+                    <% if (agents.length > 0) { %>
+                      <form action="/admin/devices/<%= encodeURIComponent(d.mac_address) %>/assign-agent" method="POST"
+                            class="flex items-center gap-1">
+                        <select name="agent_id" class="text-xs border border-gray-200 rounded px-1.5 py-1 w-28">
+                          <% agents.forEach(function(a) { %>
+                            <option value="<%= a.id %>" <%= d.agent_id === a.id ? 'selected' : '' %>><%= a.agent_name %></option>
+                          <% }) %>
+                        </select>
+                        <button type="submit" class="text-xs bg-gray-500 hover:bg-gray-600 text-white px-2 py-1 rounded transition">
+                          Gán
+                        </button>
+                      </form>
+                    <% } %>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <span class="inline-flex items-center gap-1 text-xs <%= isOnline ? 'text-green-600' : 'text-gray-400' %>">
+                    <span class="w-1.5 h-1.5 rounded-full <%= isOnline ? 'bg-green-500' : 'bg-gray-300' %>"></span>
+                    <% if (!last) { %>Chưa kết nối
+                    <% } else if (isOnline) { %>Online
+                    <% } else if (diffMin < 60) { %><%= diffMin %>p trước
+                    <% } else if (diffMin < 1440) { %><%= Math.floor(diffMin/60) %>h trước
+                    <% } else { %><%= Math.floor(diffMin/1440) %>d trước
+                    <% } %>
+                  </span>
+                </td>
+                <td class="px-4 py-3">
+                  <% if (d.user_id && d.agent_id) { %>
+                    <span class="text-green-500 text-xs font-medium">OK</span>
+                  <% } else { %>
+                    <span class="text-orange-500 text-xs font-medium">Cần thiết lập</span>
+                  <% } %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+</section>
+
+<script>
+function toggleParentFields() {
+  var mode = document.getElementById('parentMode').value;
+  document.getElementById('newParentFields').classList.toggle('hidden', mode !== 'new');
+  document.getElementById('existingParentField').classList.toggle('hidden', mode !== 'existing');
+}
+</script>
+
+<%- include('partials/footer') %>
