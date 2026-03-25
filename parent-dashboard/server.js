@@ -297,6 +297,10 @@ app.get('/history/:sessionId', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/device/:mac/status', requireAuth, (req, res) => {
+  res.redirect(`/device/${encodeURIComponent(req.params.mac)}/stats`);
+});
+
 app.get('/device/:mac/stats', requireAuth, async (req, res) => {
   try {
     const mac = req.params.mac;
