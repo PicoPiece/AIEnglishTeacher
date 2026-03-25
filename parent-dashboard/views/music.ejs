@@ -9,20 +9,20 @@
     </div>
     <div>
       <h1 class="text-xl font-bold text-gray-800">Thư viện nhạc</h1>
-      <div class="text-sm text-gray-400"><%= songs.length %> bài</div>
+      <div class="text-sm text-gray-400"><%= songs.length %> bài (server) &middot; <%= sdFiles.length %> file (SD card)</div>
     </div>
   </div>
 </div>
 
 <!-- Category filter -->
 <div class="flex items-center gap-2 mb-4 flex-wrap">
-  <a href="/music"
+  <a href="/music<%= selectedMac ? '?device=' + encodeURIComponent(selectedMac) : '' %>"
      class="px-3 py-1.5 rounded-full text-sm font-medium transition
             <%= !activeCategory ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>">
     Tất cả
   </a>
   <% categories.forEach(function(c) { %>
-    <a href="/music?category=<%= c.value %>"
+    <a href="/music?category=<%= c.value %><%= selectedMac ? '&device=' + encodeURIComponent(selectedMac) : '' %>"
        class="px-3 py-1.5 rounded-full text-sm font-medium transition
               <%= activeCategory === c.value ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>">
       <%= c.label %>
@@ -30,46 +30,101 @@
   <% }) %>
 </div>
 
-<!-- Upload form -->
+<!-- SD Card Files Section -->
+<% if (devices.length > 0) { %>
 <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
-  <h2 class="text-sm font-semibold text-gray-700 mb-3">Upload nhạc mới</h2>
-  <form action="/music/upload" method="POST" enctype="multipart/form-data" class="space-y-3">
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-      <div>
-        <label class="block text-xs text-gray-500 mb-1">Tên bài (tùy chọn)</label>
-        <input type="text" name="title" placeholder="Tự lấy từ tên file" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-300 focus:border-pink-400 outline-none">
-      </div>
-      <div>
-        <label class="block text-xs text-gray-500 mb-1">Nghệ sĩ</label>
-        <input type="text" name="artist" placeholder="(tùy chọn)" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-300 focus:border-pink-400 outline-none">
-      </div>
-      <div>
-        <label class="block text-xs text-gray-500 mb-1">Thể loại</label>
-        <select name="category" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-300 focus:border-pink-400 outline-none">
-          <% categories.forEach(function(c) { %>
-            <option value="<%= c.value %>" <%= activeCategory === c.value ? 'selected' : '' %>><%= c.label %></option>
-          <% }) %>
-        </select>
-      </div>
-    </div>
-    <div>
-      <label class="block text-xs text-gray-500 mb-1">Chọn file (MP3, WAV, OGG, M4A - tối đa 50MB)</label>
-      <input type="file" name="files" accept=".mp3,.wav,.ogg,.m4a" multiple required
-             class="w-full text-sm file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-pink-50 file:text-pink-600 file:font-medium hover:file:bg-pink-100 file:cursor-pointer">
-    </div>
-    <button type="submit" class="bg-pink-500 hover:bg-pink-600 text-white font-medium px-5 py-2 rounded-lg transition text-sm">
-      Upload
-    </button>
-  </form>
-</div>
-
-<!-- Song list -->
-<% if (songs.length === 0) { %>
-  <div class="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">
-    Chưa có bài nhạc nào. Hãy upload bài đầu tiên!
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold text-gray-700 flex items-center gap-2">
+      <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+      </svg>
+      Nhạc trên thẻ SD
+    </h2>
+    <% if (devices.length > 1) { %>
+    <form method="GET" action="/music" class="flex items-center gap-2">
+      <% if (activeCategory) { %><input type="hidden" name="category" value="<%= activeCategory %>"><% } %>
+      <select name="device" onchange="this.form.submit()" class="border rounded-lg px-2 py-1 text-xs focus:ring-2 focus:ring-amber-300 outline-none">
+        <% devices.forEach(function(d) { %>
+          <option value="<%= d.mac_address %>" <%= selectedMac === d.mac_address ? 'selected' : '' %>>
+            <%= d.alias || d.mac_address %>
+          </option>
+        <% }) %>
+      </select>
+    </form>
+    <% } %>
   </div>
-<% } else { %>
-  <div class="bg-white rounded-xl shadow-sm border divide-y">
+
+  <% if (sdFiles.length === 0) { %>
+    <div class="text-center py-4 text-gray-400 text-sm">
+      Chưa có file SD. <a href="/device/<%= selectedMac %>/sd-files" class="text-amber-500 hover:text-amber-700">Xem & đồng bộ thẻ SD</a>
+    </div>
+  <% } else { %>
+    <div class="divide-y border rounded-lg max-h-64 overflow-y-auto">
+      <% sdFiles.forEach(function(f) { %>
+        <div class="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 transition text-sm">
+          <div class="w-7 h-7 flex-shrink-0 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/>
+            </svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <span class="text-gray-800 truncate block"><%= f.filename %></span>
+          </div>
+          <span class="bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded text-[10px] flex-shrink-0"><%= f.category %></span>
+          <% if (f.file_size) { %>
+            <span class="text-xs text-gray-400 flex-shrink-0"><%= (f.file_size / 1024 / 1024).toFixed(1) %>MB</span>
+          <% } %>
+        </div>
+      <% }) %>
+    </div>
+    <div class="mt-2 text-right">
+      <a href="/device/<%= selectedMac %>/sd-files" class="text-xs text-amber-500 hover:text-amber-700">Xem tất cả & đồng bộ &rarr;</a>
+    </div>
+  <% } %>
+</div>
+<% } %>
+
+<!-- Upload form (server music) -->
+<details class="bg-white rounded-xl shadow-sm border mb-6">
+  <summary class="px-5 py-3 text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-50 transition">
+    Upload nhạc lên server (tuỳ chọn)
+  </summary>
+  <div class="px-5 pb-5">
+    <form action="/music/upload" method="POST" enctype="multipart/form-data" class="space-y-3">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Tên bài (tùy chọn)</label>
+          <input type="text" name="title" placeholder="Tự lấy từ tên file" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-300 focus:border-pink-400 outline-none">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Nghệ sĩ</label>
+          <input type="text" name="artist" placeholder="(tùy chọn)" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-300 focus:border-pink-400 outline-none">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Thể loại</label>
+          <select name="category" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-300 focus:border-pink-400 outline-none">
+            <% categories.forEach(function(c) { %>
+              <option value="<%= c.value %>" <%= activeCategory === c.value ? 'selected' : '' %>><%= c.label %></option>
+            <% }) %>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Chọn file (MP3, WAV, OGG, M4A - tối đa 50MB)</label>
+        <input type="file" name="files" accept=".mp3,.wav,.ogg,.m4a" multiple required
+               class="w-full text-sm file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-pink-50 file:text-pink-600 file:font-medium hover:file:bg-pink-100 file:cursor-pointer">
+      </div>
+      <button type="submit" class="bg-pink-500 hover:bg-pink-600 text-white font-medium px-5 py-2 rounded-lg transition text-sm">
+        Upload
+      </button>
+    </form>
+  </div>
+</details>
+
+<!-- Server song list -->
+<% if (songs.length > 0) { %>
+  <h2 class="text-sm font-semibold text-gray-600 mb-2">Nhạc trên server (<%= songs.length %>)</h2>
+  <div class="bg-white rounded-xl shadow-sm border divide-y mb-6">
     <% songs.forEach(function(s, idx) { %>
       <div class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition group" id="song-<%= s.id %>">
         <div class="w-8 text-center text-xs text-gray-400 font-mono"><%= idx + 1 %></div>

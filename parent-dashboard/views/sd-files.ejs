@@ -1,0 +1,134 @@
+<%- include('partials/header', { pageTitle: 'SD Card - ' + (device.alias || device.mac_address), username }) %>
+
+<div class="mb-4 flex items-center gap-2 text-sm text-gray-400">
+  <a href="/dashboard" class="hover:text-primary-500 transition">Thiết bị</a>
+  <span>/</span>
+  <a href="/device/<%= device.mac_address %>" class="hover:text-primary-500 transition"><%= device.alias || device.mac_address %></a>
+  <span>/</span>
+  <span class="text-gray-600">SD Card</span>
+</div>
+
+<div class="flex items-center justify-between mb-6">
+  <div class="flex items-center gap-3">
+    <div class="w-12 h-12 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+      </svg>
+    </div>
+    <div>
+      <h1 class="text-xl font-bold text-gray-800">Nhạc trên thẻ SD</h1>
+      <div class="text-sm text-gray-400">
+        <%= files.length %> file
+        <% if (lastSync) { %>
+          &middot; Đồng bộ lần cuối: <%= new Date(lastSync).toLocaleString('vi-VN') %>
+        <% } %>
+      </div>
+    </div>
+  </div>
+  <div class="flex items-center gap-3">
+    <span class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full
+      <%= isOnline ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500' %>">
+      <span class="w-2 h-2 rounded-full <%= isOnline ? 'bg-green-500' : 'bg-gray-400' %>"></span>
+      <%= isOnline ? 'Online' : 'Offline' %>
+    </span>
+    <button onclick="syncSdFiles()" id="syncBtn"
+      class="bg-amber-500 hover:bg-amber-600 text-white font-medium px-4 py-2 rounded-lg transition text-sm inline-flex items-center gap-2
+             <%= !isOnline ? 'opacity-50 cursor-not-allowed' : '' %>"
+      <%= !isOnline ? 'disabled' : '' %>>
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      Đồng bộ
+    </button>
+  </div>
+</div>
+
+<% if (categories.length > 1) { %>
+<div class="flex items-center gap-2 mb-4 flex-wrap">
+  <a href="/device/<%= device.mac_address %>/sd-files"
+     class="px-3 py-1.5 rounded-full text-sm font-medium transition
+            <%= !activeCategory ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>">
+    Tất cả
+  </a>
+  <% categories.forEach(function(c) { %>
+    <a href="/device/<%= device.mac_address %>/sd-files?category=<%= encodeURIComponent(c) %>"
+       class="px-3 py-1.5 rounded-full text-sm font-medium transition
+              <%= activeCategory === c ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>">
+      <%= c %>
+    </a>
+  <% }) %>
+</div>
+<% } %>
+
+<% if (files.length === 0) { %>
+  <div class="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">
+    <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4">
+      <svg class="w-8 h-8 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/>
+      </svg>
+    </div>
+    <p class="text-gray-500 mb-2">Chưa có file nhạc trên thẻ SD</p>
+    <p class="text-sm text-gray-400">Copy file nhạc vào thư mục <code class="bg-gray-100 px-1.5 py-0.5 rounded">/sdcard/music/</code> trên thiết bị, sau đó nhấn "Đồng bộ".</p>
+  </div>
+<% } else { %>
+  <div class="bg-white rounded-xl shadow-sm border divide-y">
+    <% let currentCat = ''; %>
+    <% files.forEach(function(f, idx) { %>
+      <% if (f.category !== currentCat) { currentCat = f.category; %>
+        <div class="px-4 py-2 bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          <svg class="w-3.5 h-3.5 inline mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+          </svg>
+          <%= f.category %>
+        </div>
+      <% } %>
+      <div class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition">
+        <div class="w-8 h-8 flex-shrink-0 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/>
+          </svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium text-gray-800 truncate"><%= f.filename %></div>
+          <div class="text-xs text-gray-400 truncate">
+            <span class="bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded text-[10px]">SD Card</span>
+            <% if (f.file_size) { %>
+              <span class="mx-1">&middot;</span>
+              <span><%= (f.file_size / 1024 / 1024).toFixed(1) %> MB</span>
+            <% } %>
+            <span class="mx-1">&middot;</span>
+            <span class="text-gray-300 text-[10px]" title="<%= f.filepath %>"><%= f.filepath %></span>
+          </div>
+        </div>
+      </div>
+    <% }) %>
+  </div>
+<% } %>
+
+<script>
+async function syncSdFiles() {
+  const btn = document.getElementById('syncBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Đang đồng bộ...';
+  try {
+    const resp = await fetch('/device/<%= device.mac_address %>/sd-files/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    const data = await resp.json();
+    if (data.success) {
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      alert('Đồng bộ thất bại: ' + (data.error || 'Unknown'));
+      btn.disabled = false;
+      btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Đồng bộ';
+    }
+  } catch (e) {
+    alert('Lỗi: ' + e.message);
+    btn.disabled = false;
+  }
+}
+</script>
+
+<%- include('partials/footer') %>

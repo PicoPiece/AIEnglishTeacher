@@ -28,14 +28,29 @@
     <% items.forEach(function(s, idx) { %>
       <div class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition group">
         <div class="w-6 text-center text-xs text-gray-400 font-mono"><%= idx + 1 %></div>
-        <button onclick="togglePlay(<%= s.id %>)" class="w-8 h-8 flex-shrink-0 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center hover:bg-indigo-100 transition">
-          <svg id="play-icon-<%= s.id %>" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z"/>
-          </svg>
-        </button>
+        <% if (s.source === 'sd') { %>
+          <div class="w-8 h-8 flex-shrink-0 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center" title="SD Card">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+            </svg>
+          </div>
+        <% } else { %>
+          <button onclick="togglePlay(<%= s.id %>)" class="w-8 h-8 flex-shrink-0 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center hover:bg-indigo-100 transition">
+            <svg id="play-icon-<%= s.id %>" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+        <% } %>
         <div class="flex-1 min-w-0">
           <div class="text-sm font-medium text-gray-800 truncate"><%= s.title %></div>
-          <div class="text-xs text-gray-400"><%= s.artist || 'Unknown' %> &middot; <span class="bg-gray-100 px-1.5 py-0.5 rounded text-[10px]"><%= s.category %></span></div>
+          <div class="text-xs text-gray-400">
+            <% if (s.source === 'sd') { %>
+              <span class="bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded text-[10px]">SD Card</span>
+            <% } else { %>
+              <%= s.artist || 'Unknown' %> &middot;
+            <% } %>
+            <span class="bg-gray-100 px-1.5 py-0.5 rounded text-[10px]"><%= s.category %></span>
+          </div>
         </div>
         <form action="/playlists/<%= playlist.id %>/remove-song" method="POST" class="opacity-0 group-hover:opacity-100 transition">
           <input type="hidden" name="item_id" value="<%= s.item_id %>">
@@ -47,25 +62,42 @@
 <% } %>
 
 <!-- Add song to playlist -->
-<% if (availableSongs.length > 0) { %>
-  <div class="bg-white rounded-xl shadow-sm border p-5">
-    <h2 class="text-sm font-semibold text-gray-700 mb-3">Thêm bài nhạc</h2>
-    <form action="/playlists/<%= playlist.id %>/add-song" method="POST" class="flex gap-3">
+<div class="bg-white rounded-xl shadow-sm border p-5 mb-4">
+  <h2 class="text-sm font-semibold text-gray-700 mb-3">Thêm bài nhạc</h2>
+
+  <% if (availableSongs.length > 0) { %>
+    <form action="/playlists/<%= playlist.id %>/add-song" method="POST" class="flex gap-3 mb-3">
       <select name="music_id" required class="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 outline-none">
         <% availableSongs.forEach(function(s) { %>
           <option value="<%= s.id %>"><%= s.title %> - <%= s.artist || s.category %></option>
         <% }) %>
       </select>
       <button type="submit" class="bg-indigo-500 hover:bg-indigo-600 text-white font-medium px-5 py-2 rounded-lg transition text-sm whitespace-nowrap">
-        Thêm
+        Thêm (Server)
       </button>
     </form>
-  </div>
-<% } else { %>
-  <div class="text-center text-sm text-gray-400">
-    <a href="/music" class="text-indigo-500 hover:text-indigo-700 transition">Upload thêm nhạc</a> để thêm vào playlist.
-  </div>
-<% } %>
+  <% } %>
+
+  <% if (typeof availableSdFiles !== 'undefined' && availableSdFiles.length > 0) { %>
+    <form action="/playlists/<%= playlist.id %>/add-song" method="POST" class="flex gap-3">
+      <select name="sd_file_id" required class="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-300 focus:border-amber-400 outline-none">
+        <% availableSdFiles.forEach(function(f) { %>
+          <option value="<%= f.id %>"><%= f.filename %> (<%= f.category %>) — SD Card</option>
+        <% }) %>
+      </select>
+      <button type="submit" class="bg-amber-500 hover:bg-amber-600 text-white font-medium px-5 py-2 rounded-lg transition text-sm whitespace-nowrap">
+        Thêm (SD)
+      </button>
+    </form>
+  <% } %>
+
+  <% if (availableSongs.length === 0 && (typeof availableSdFiles === 'undefined' || availableSdFiles.length === 0)) { %>
+    <div class="text-center text-sm text-gray-400">
+      <a href="/music" class="text-indigo-500 hover:text-indigo-700 transition">Upload nhạc</a> hoặc
+      <a href="/device/<%= (typeof devices !== 'undefined' && devices.length > 0) ? devices[0].mac_address : '' %>/sd-files" class="text-amber-500 hover:text-amber-700 transition">đồng bộ thẻ SD</a> để thêm vào playlist.
+    </div>
+  <% } %>
+</div>
 
 <!-- Hidden audio player -->
 <audio id="audioPlayer" style="display:none"></audio>

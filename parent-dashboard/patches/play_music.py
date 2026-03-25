@@ -1,8 +1,10 @@
 import os
 import re
+import json
 import time
 import random
 import difflib
+import asyncio
 import traceback
 from pathlib import Path
 from core.handle.sendAudioHandle import send_stt_message
@@ -95,6 +97,20 @@ def _find_best_match(potential_song, music_files):
     return best_match
 
 
+def _find_best_sd_match(potential_song, sd_files):
+    """Match a song name against SD card files from the database."""
+    best_match = None
+    highest_ratio = 0
+
+    for sd_file in sd_files:
+        name = sd_file.get("filename", "")
+        ratio = difflib.SequenceMatcher(None, potential_song.lower(), name.lower()).ratio()
+        if ratio > highest_ratio and ratio > 0.3:
+            highest_ratio = ratio
+            best_match = sd_file
+    return best_match
+
+
 def get_music_files(music_dir, music_ext):
     music_dir = Path(music_dir)
     music_files = []
@@ -136,6 +152,54 @@ def initialize_music_handler(conn: "ConnectionHandler"):
     return MUSIC_CACHE
 
 
+def _get_device_sd_files(mac_address):
+    """Query device_sd_files table for this device's SD card music."""
+    try:
+        import pymysql
+        db = pymysql.connect(
+            host=os.environ.get("DB_HOST", "xiaozhi-esp32-server-db"),
+            port=int(os.environ.get("DB_PORT", "3306")),
+            user="root",
+            password=os.environ.get("DB_ROOT_PASS", "123456"),
+            database="xiaozhi_esp32_server",
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        cursor = db.cursor()
+        cursor.execute(
+            "SELECT id, filepath, filename, file_size FROM device_sd_files WHERE mac_address = %s",
+            (mac_address,)
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        db.close()
+        return rows
+    except Exception as e:
+        import logging
+        logging.getLogger(TAG).error(f"Failed to query device_sd_files: {e}")
+        return []
+
+
+async def _send_mcp_play_sd(conn: "ConnectionHandler", filepath: str):
+    """Send MCP tools/call to play an SD card file on the device."""
+    mcp_id = int(time.time() * 1000) % 100000
+    payload = {
+        "jsonrpc": "2.0",
+        "id": mcp_id,
+        "method": "tools/call",
+        "params": {
+            "name": "self.play_sd_music",
+            "arguments": {"filepath": filepath}
+        }
+    }
+    message = json.dumps({
+        "session_id": conn.session_id if hasattr(conn, "session_id") else "",
+        "type": "mcp",
+        "payload": payload,
+    })
+    conn.logger.bind(tag=TAG).info(f"Sending MCP play_sd_music: {filepath}")
+    await conn.websocket.send(message)
+
+
 async def handle_music_command(conn: "ConnectionHandler", text):
     initialize_music_handler(conn)
     global MUSIC_CACHE
@@ -143,6 +207,35 @@ async def handle_music_command(conn: "ConnectionHandler", text):
     clean_text = re.sub(r"[^\w\s]", "", text).strip()
     conn.logger.bind(tag=TAG).debug(f"Checking music command: {clean_text}")
 
+    potential_song = _extract_song_name(clean_text)
+
+    # Try SD card files first if device has a MAC address
+    mac = getattr(conn, "headers", {}).get("device-id", "") if hasattr(conn, "headers") else ""
+    if not mac:
+        mac = getattr(conn, "device_id", "") or ""
+
+    if mac:
+        sd_files = _get_device_sd_files(mac)
+        if sd_files:
+            if potential_song:
+                match = _find_best_sd_match(potential_song, sd_files)
+                if match:
+                    conn.logger.bind(tag=TAG).info(f"SD card match: {match['filepath']}")
+                    text_prompt = _get_random_play_prompt(match["filename"])
+                    await send_stt_message(conn, text_prompt)
+                    conn.dialogue.put(Message(role="assistant", content=text_prompt))
+                    await _send_mcp_play_sd(conn, match["filepath"])
+                    return True
+            else:
+                chosen = random.choice(sd_files)
+                conn.logger.bind(tag=TAG).info(f"Random SD card play: {chosen['filepath']}")
+                text_prompt = _get_random_play_prompt(chosen["filename"])
+                await send_stt_message(conn, text_prompt)
+                conn.dialogue.put(Message(role="assistant", content=text_prompt))
+                await _send_mcp_play_sd(conn, chosen["filepath"])
+                return True
+
+    # Fallback to server-side music streaming
     if os.path.exists(MUSIC_CACHE["music_dir"]):
         if time.time() - MUSIC_CACHE["scan_time"] > MUSIC_CACHE["refresh_time"]:
             MUSIC_CACHE["music_files"], MUSIC_CACHE["music_file_names"] = (
@@ -150,7 +243,6 @@ async def handle_music_command(conn: "ConnectionHandler", text):
             )
             MUSIC_CACHE["scan_time"] = time.time()
 
-        potential_song = _extract_song_name(clean_text)
         if potential_song:
             best_match = _find_best_match(potential_song, MUSIC_CACHE["music_files"])
             if best_match:

@@ -590,7 +590,7 @@ if (!fs.existsSync(PREVIEW_DIR)) fs.mkdirSync(PREVIEW_DIR, { recursive: true });
 const PREVIEW_TEXT = "Hello! My name is Teacher AI. Let's learn English together! Chào bé, hôm nay mình học gì nhé?";
 
 async function generatePreview(ttsVoice, outputPath) {
-  const comm = new Communicate(PREVIEW_TEXT, ttsVoice);
+  const comm = new Communicate(PREVIEW_TEXT, { voice: ttsVoice });
   const ws = fs.createWriteStream(outputPath);
   for await (const chunk of comm.stream()) {
     if (chunk.type === 'audio') ws.write(chunk.data);
@@ -656,11 +656,29 @@ app.get('/music', requireAuth, async (req, res) => {
     query += ' ORDER BY sort_order ASC, created_at DESC';
     const [songs] = await pool.query(query, params);
 
+    const [devices] = await pool.query(
+      'SELECT mac_address, alias FROM ai_device WHERE user_id = ?',
+      [req.session.userId]
+    );
+
+    let sdFiles = [];
+    const selectedMac = req.query.device || (devices.length > 0 ? devices[0].mac_address : '');
+    if (selectedMac) {
+      let sdQuery = 'SELECT * FROM device_sd_files WHERE mac_address = ?';
+      const sdParams = [selectedMac];
+      if (cat) { sdQuery += ' AND category = ?'; sdParams.push(cat); }
+      sdQuery += ' ORDER BY category ASC, filename ASC';
+      [sdFiles] = await pool.query(sdQuery, sdParams);
+    }
+
     res.render('music', {
       username: req.session.username,
       songs,
       categories: MUSIC_CATEGORIES,
       activeCategory: cat,
+      devices,
+      sdFiles,
+      selectedMac,
     });
   } catch (err) {
     console.error('Music list error:', err);
@@ -801,11 +819,17 @@ app.get('/playlists/:id', requireAuth, async (req, res) => {
     const playlist = plRows[0];
 
     const [items] = await pool.query(
-      `SELECT pi.id AS item_id, pi.sort_order, m.*
+      `SELECT pi.id AS item_id, pi.sort_order, pi.sd_file_id,
+              COALESCE(m.id, 0) AS id,
+              COALESCE(m.title, sd.filename) AS title,
+              COALESCE(m.artist, '') AS artist,
+              COALESCE(m.category, sd.category) AS category,
+              IF(sd.id IS NOT NULL, 'sd', 'server') AS source
        FROM parent_playlist_item pi
-       JOIN parent_music m ON m.id = pi.music_id
+       LEFT JOIN parent_music m ON m.id = pi.music_id
+       LEFT JOIN device_sd_files sd ON sd.id = pi.sd_file_id
        WHERE pi.playlist_id = ?
-       ORDER BY pi.sort_order ASC, m.title ASC`,
+       ORDER BY pi.sort_order ASC`,
       [playlist.id]
     );
 
@@ -814,14 +838,32 @@ app.get('/playlists/:id', requireAuth, async (req, res) => {
       [req.session.userId]
     );
 
-    const inPlaylist = new Set(items.map(i => i.id));
-    const availableSongs = allSongs.filter(s => !inPlaylist.has(s.id));
+    const [devices] = await pool.query(
+      'SELECT mac_address, alias FROM ai_device WHERE user_id = ?',
+      [req.session.userId]
+    );
+
+    let sdFiles = [];
+    if (devices.length > 0) {
+      const macs = devices.map(d => d.mac_address);
+      [sdFiles] = await pool.query(
+        'SELECT id, filename, category, mac_address FROM device_sd_files WHERE mac_address IN (?) ORDER BY filename ASC',
+        [macs]
+      );
+    }
+
+    const inPlaylistMusic = new Set(items.filter(i => !i.sd_file_id).map(i => i.id));
+    const inPlaylistSd = new Set(items.filter(i => i.sd_file_id).map(i => i.sd_file_id));
+    const availableSongs = allSongs.filter(s => !inPlaylistMusic.has(s.id));
+    const availableSdFiles = sdFiles.filter(s => !inPlaylistSd.has(s.id));
 
     res.render('playlist-detail', {
       username: req.session.username,
       playlist,
       items,
       availableSongs,
+      availableSdFiles,
+      devices,
     });
   } catch (err) {
     console.error('Playlist detail error:', err);
@@ -832,7 +874,8 @@ app.get('/playlists/:id', requireAuth, async (req, res) => {
 app.post('/playlists/:id/add-song', requireAuth, async (req, res) => {
   try {
     const playlistId = req.params.id;
-    const musicId = req.body.music_id;
+    const musicId = req.body.music_id || null;
+    const sdFileId = req.body.sd_file_id || null;
     const [plRows] = await pool.query(
       'SELECT id FROM parent_playlist WHERE id = ? AND user_id = ?',
       [playlistId, req.session.userId]
@@ -844,8 +887,8 @@ app.post('/playlists/:id/add-song', requireAuth, async (req, res) => {
       [playlistId]
     );
     await pool.query(
-      'INSERT INTO parent_playlist_item (playlist_id, music_id, sort_order) VALUES (?, ?, ?)',
-      [playlistId, musicId, maxOrder[0].next_order]
+      'INSERT INTO parent_playlist_item (playlist_id, music_id, sd_file_id, sort_order) VALUES (?, ?, ?, ?)',
+      [playlistId, musicId, sdFileId, maxOrder[0].next_order]
     );
     res.redirect(`/playlists/${playlistId}`);
   } catch (err) {
@@ -949,6 +992,128 @@ app.post('/schedules/:id/delete', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Delete schedule error:', err);
     res.status(500).render('error', { message: 'Failed to delete schedule' });
+  }
+});
+
+// ===========================================
+// SD Card Music -- file browser & sync
+// ===========================================
+
+app.get('/device/:mac/sd-files', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devRows] = await pool.query(
+      `SELECT d.id, d.mac_address, d.alias, d.board, d.last_connected_at
+       FROM ai_device d WHERE d.mac_address = ? AND d.user_id = ?`,
+      [mac, req.session.userId]
+    );
+    if (devRows.length === 0) return res.status(403).render('error', { message: 'Device not found' });
+    const device = devRows[0];
+
+    const cat = req.query.category || '';
+    let query = 'SELECT * FROM device_sd_files WHERE mac_address = ?';
+    const params = [mac];
+    if (cat) { query += ' AND category = ?'; params.push(cat); }
+    query += ' ORDER BY category ASC, filename ASC';
+    const [files] = await pool.query(query, params);
+
+    const [catRows] = await pool.query(
+      'SELECT DISTINCT category FROM device_sd_files WHERE mac_address = ? ORDER BY category',
+      [mac]
+    );
+    const categories = catRows.map(r => r.category);
+
+    const isOnline = device.last_connected_at &&
+      (Date.now() - new Date(device.last_connected_at).getTime()) < 5 * 60 * 1000;
+
+    const [syncInfo] = await pool.query(
+      'SELECT MAX(last_seen_at) AS last_sync FROM device_sd_files WHERE mac_address = ?',
+      [mac]
+    );
+
+    res.render('sd-files', {
+      username: req.session.username,
+      device,
+      files,
+      categories,
+      activeCategory: cat,
+      isOnline,
+      lastSync: syncInfo[0]?.last_sync || null,
+    });
+  } catch (err) {
+    console.error('SD files error:', err);
+    res.status(500).render('error', { message: 'Failed to load SD card files' });
+  }
+});
+
+app.get('/api/device/:mac/sd-files.json', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devRows] = await pool.query(
+      'SELECT id FROM ai_device WHERE mac_address = ? AND user_id = ?',
+      [mac, req.session.userId]
+    );
+    if (devRows.length === 0) return res.status(403).json({ error: 'Device not found' });
+
+    const [files] = await pool.query(
+      'SELECT * FROM device_sd_files WHERE mac_address = ? ORDER BY category ASC, filename ASC',
+      [mac]
+    );
+    res.json({ files });
+  } catch (err) {
+    console.error('SD files JSON error:', err);
+    res.status(500).json({ error: 'Failed to load SD files' });
+  }
+});
+
+app.post('/device/:mac/sd-files/sync', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devRows] = await pool.query(
+      'SELECT id FROM ai_device WHERE mac_address = ? AND user_id = ?',
+      [mac, req.session.userId]
+    );
+    if (devRows.length === 0) return res.status(403).json({ error: 'Device not found' });
+
+    // For now, sync is triggered manually and the device reports back via MCP.
+    // The actual MCP call happens through the xiaozhi-server when the device is online.
+    // This endpoint stores/refreshes data when called with a file list from the device.
+    const fileList = req.body.files;
+
+    if (Array.isArray(fileList)) {
+      const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      for (const f of fileList) {
+        const filepath = f.path || f.filepath || '';
+        const filename = f.name || f.filename || path.basename(filepath, path.extname(filepath));
+        const fileSize = f.size || f.file_size || 0;
+        const parts = filepath.replace(/\\/g, '/').split('/');
+        const category = parts.length > 3 ? parts[parts.length - 2] : 'general';
+
+        await pool.query(
+          `INSERT INTO device_sd_files (mac_address, filepath, filename, file_size, category, last_seen_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE filename = VALUES(filename), file_size = VALUES(file_size),
+                                    category = VALUES(category), last_seen_at = VALUES(last_seen_at)`,
+          [mac, filepath, filename, fileSize, category, now]
+        );
+      }
+
+      // Remove stale files not in the latest scan
+      const activePaths = fileList.map(f => f.path || f.filepath).filter(Boolean);
+      if (activePaths.length > 0) {
+        await pool.query(
+          'DELETE FROM device_sd_files WHERE mac_address = ? AND filepath NOT IN (?) AND last_seen_at < ?',
+          [mac, activePaths, now]
+        );
+      }
+
+      return res.json({ success: true, count: fileList.length });
+    }
+
+    res.json({ success: true, message: 'Sync request noted. Files will update when device responds.' });
+  } catch (err) {
+    console.error('SD sync error:', err);
+    res.status(500).json({ error: 'Sync failed' });
   }
 });
 

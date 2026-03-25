@@ -27,4 +27,7 @@ GRANT ALL ON xiaozhi_esp32_server.parent_playlist TO 'parent_reader'@'%';
 GRANT ALL ON xiaozhi_esp32_server.parent_playlist_item TO 'parent_reader'@'%';
 GRANT ALL ON xiaozhi_esp32_server.parent_play_schedule TO 'parent_reader'@'%';
 
+-- SD card file metadata (synced from device)
+GRANT SELECT, INSERT, UPDATE, DELETE ON xiaozhi_esp32_server.device_sd_files TO 'parent_reader'@'%';
+
 FLUSH PRIVILEGES;
