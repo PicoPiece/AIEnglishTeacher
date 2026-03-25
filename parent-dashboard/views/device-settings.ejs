@@ -92,6 +92,65 @@
                   placeholder="VD: Bé thích được khen. Hãy dùng nhiều ví dụ về động vật."
                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none transition resize-none"><%= structured ? structured.extraNotes || '' : '' %></textarea>
       </div>
+
+      <!-- Voice Picker Section -->
+      <div class="pt-4 border-t">
+        <div class="flex items-center gap-2 mb-3">
+          <svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+          </svg>
+          <label class="text-sm font-medium text-gray-700">Giọng nói AI</label>
+        </div>
+        <p class="text-xs text-gray-400 mb-3">Chọn giọng phù hợp cho bé. Bấm <strong>Nghe thử</strong> để so sánh.</p>
+
+        <input type="hidden" name="voiceId" id="voiceIdInput" value="<%= currentVoiceId %>">
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" id="voiceGrid">
+          <% voices.forEach(function(v) { %>
+            <div class="voice-card relative border-2 rounded-xl p-3 cursor-pointer transition-all hover:shadow-md
+                        <%= v.id === currentVoiceId ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-200' : 'border-gray-200 hover:border-gray-300' %>"
+                 data-voice-id="<%= v.id %>" onclick="selectVoice('<%= v.id %>')">
+              <div class="flex items-start justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm
+                              <%= v.gender === 'male' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600' %>">
+                    <%= v.gender === 'male' ? '♂' : '♀' %>
+                  </div>
+                  <div>
+                    <div class="font-semibold text-sm text-gray-800"><%= v.label %></div>
+                    <div class="text-xs text-gray-400"><%= v.desc %></div>
+                  </div>
+                </div>
+                <% if (v.tag) { %>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium
+                    <%= v.tag === 'Khuyên dùng' ? 'bg-green-100 text-green-700' :
+                       v.tag === 'Tiếng Việt' ? 'bg-orange-100 text-orange-700' :
+                       'bg-gray-100 text-gray-500' %>">
+                    <%= v.tag %>
+                  </span>
+                <% } %>
+              </div>
+              <div class="mt-2 flex items-center gap-2">
+                <button type="button" onclick="event.stopPropagation(); previewVoice('<%= v.id %>', this)"
+                        class="preview-btn flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium transition">
+                  <svg class="w-3.5 h-3.5 play-icon" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M6.3 2.841A1.5 1.5 0 004 4.11v11.78a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"/>
+                  </svg>
+                  <svg class="w-3.5 h-3.5 stop-icon hidden" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M5.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75V3.75A.75.75 0 007.25 3h-1.5zM12.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75V3.75a.75.75 0 00-.75-.75h-1.5z"/>
+                  </svg>
+                  <span class="btn-text">Nghe thử</span>
+                </button>
+                <div class="check-mark ml-auto <%= v.id === currentVoiceId ? '' : 'hidden' %>">
+                  <svg class="w-5 h-5 text-primary-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+          <% }); %>
+        </div>
+      </div>
     </div>
 
     <!-- Advanced tab -->
@@ -120,6 +179,8 @@
 
 <script>
   var currentTab = 'structured';
+  var currentAudio = null;
+  var currentPlayingBtn = null;
 
   function switchTab(tab) {
     if (tab === currentTab) return;
@@ -137,6 +198,71 @@
     document.getElementById('tabAdvanced').className = !isStructured
       ? 'flex-1 px-4 py-3 text-sm font-medium text-center transition tab-active'
       : 'flex-1 px-4 py-3 text-sm font-medium text-center transition text-gray-400 hover:text-gray-600';
+  }
+
+  function selectVoice(voiceId) {
+    document.getElementById('voiceIdInput').value = voiceId;
+    document.querySelectorAll('.voice-card').forEach(function(card) {
+      var isSelected = card.dataset.voiceId === voiceId;
+      card.classList.toggle('border-primary-500', isSelected);
+      card.classList.toggle('bg-primary-50', isSelected);
+      card.classList.toggle('ring-2', isSelected);
+      card.classList.toggle('ring-primary-200', isSelected);
+      card.classList.toggle('border-gray-200', !isSelected);
+      card.querySelector('.check-mark').classList.toggle('hidden', !isSelected);
+    });
+  }
+
+  function stopCurrentAudio() {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+      currentAudio = null;
+    }
+    if (currentPlayingBtn) {
+      currentPlayingBtn.querySelector('.play-icon').classList.remove('hidden');
+      currentPlayingBtn.querySelector('.stop-icon').classList.add('hidden');
+      currentPlayingBtn.querySelector('.btn-text').textContent = 'Nghe thử';
+      currentPlayingBtn = null;
+    }
+  }
+
+  function previewVoice(voiceId, btn) {
+    if (currentAudio && currentPlayingBtn === btn) {
+      stopCurrentAudio();
+      return;
+    }
+    stopCurrentAudio();
+
+    btn.querySelector('.play-icon').classList.add('hidden');
+    btn.querySelector('.stop-icon').classList.remove('hidden');
+    btn.querySelector('.btn-text').textContent = 'Đang tải...';
+    currentPlayingBtn = btn;
+
+    var audio = new Audio('/api/voice/preview/' + voiceId);
+    currentAudio = audio;
+
+    audio.addEventListener('canplay', function() {
+      if (currentPlayingBtn === btn) {
+        btn.querySelector('.btn-text').textContent = 'Đang phát...';
+      }
+    });
+
+    audio.addEventListener('ended', function() {
+      stopCurrentAudio();
+    });
+
+    audio.addEventListener('error', function() {
+      if (currentPlayingBtn === btn) {
+        btn.querySelector('.btn-text').textContent = 'Lỗi!';
+        setTimeout(function() { stopCurrentAudio(); }, 1500);
+      }
+    });
+
+    audio.play().catch(function() {
+      btn.querySelector('.btn-text').textContent = 'Lỗi!';
+      setTimeout(function() { stopCurrentAudio(); }, 1500);
+    });
   }
 </script>
 

@@ -56,26 +56,13 @@ app.use((req, res, next) => {
 const MUSIC_DIR = process.env.MUSIC_DIR || path.join(__dirname, 'data', 'music');
 if (!fs.existsSync(MUSIC_DIR)) fs.mkdirSync(MUSIC_DIR, { recursive: true });
 
-function sanitizeFilename(name) {
-  return name
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .substring(0, 120) || 'untitled';
-}
-
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, MUSIC_DIR),
     filename: (req, file, cb) => {
+      const unique = Date.now() + '-' + Math.round(Math.random() * 1e6);
       const ext = path.extname(file.originalname) || '.mp3';
-      const baseName = req.body.title
-        ? sanitizeFilename(req.body.title)
-        : sanitizeFilename(path.basename(file.originalname, ext));
-      const stamp = Date.now().toString(36);
-      const finalName = `${baseName}_${stamp}${ext}`;
-      cb(null, finalName);
+      cb(null, unique + ext);
     },
   }),
   fileFilter: (req, file, cb) => {
@@ -392,6 +379,22 @@ app.get('/device/:mac/stats', requireAuth, async (req, res) => {
   }
 });
 
+const VOICE_IDS_FOR_PARENTS = [
+  'TTS_EdgeTTS_ML001', 'TTS_EdgeTTS_ML002', 'TTS_EdgeTTS_ML003',
+  'TTS_EdgeTTS_EN001', 'TTS_EdgeTTS_EN002', 'TTS_EdgeTTS_EN004',
+  'TTS_EdgeTTS_VI001',
+];
+
+const VOICE_META = {
+  'TTS_EdgeTTS_ML001': { label: 'Ava', desc: 'Nữ - Đa ngôn ngữ', tag: 'Khuyên dùng', gender: 'female' },
+  'TTS_EdgeTTS_ML002': { label: 'Emma', desc: 'Nữ - Đa ngôn ngữ', tag: 'Multilingual', gender: 'female' },
+  'TTS_EdgeTTS_ML003': { label: 'Brian', desc: 'Nam - Đa ngôn ngữ', tag: 'Multilingual', gender: 'male' },
+  'TTS_EdgeTTS_EN001': { label: 'Aria', desc: 'Nữ - Tiếng Anh (Mỹ)', tag: 'English', gender: 'female' },
+  'TTS_EdgeTTS_EN002': { label: 'Guy', desc: 'Nam - Tiếng Anh (Mỹ)', tag: 'English', gender: 'male' },
+  'TTS_EdgeTTS_EN004': { label: 'Sonia', desc: 'Nữ - Tiếng Anh (Anh)', tag: 'English UK', gender: 'female' },
+  'TTS_EdgeTTS_VI001': { label: 'Hoài My', desc: 'Nữ - Tiếng Việt', tag: 'Tiếng Việt', gender: 'female' },
+};
+
 app.get('/device/:mac/settings', requireAuth, async (req, res) => {
   try {
     const mac = req.params.mac;
@@ -404,18 +407,30 @@ app.get('/device/:mac/settings', requireAuth, async (req, res) => {
     if (!device.agent_id) return res.render('error', { message: 'No AI agent linked to this device' });
 
     const [agentRows] = await pool.query(
-      'SELECT id, system_prompt FROM ai_agent WHERE id = ?',
+      'SELECT id, system_prompt, tts_voice_id FROM ai_agent WHERE id = ?',
       [device.agent_id]
     );
     if (agentRows.length === 0) return res.render('error', { message: 'Agent not found' });
 
     const { structured, raw } = parsePromptFields(agentRows[0].system_prompt);
 
+    const [voiceRows] = await pool.query(
+      'SELECT id, name, tts_voice, languages FROM ai_tts_voice WHERE id IN (?)',
+      [VOICE_IDS_FOR_PARENTS]
+    );
+    const voices = VOICE_IDS_FOR_PARENTS.map(vid => {
+      const row = voiceRows.find(r => r.id === vid);
+      const meta = VOICE_META[vid] || {};
+      return row ? { id: row.id, tts_voice: row.tts_voice, ...meta } : null;
+    }).filter(Boolean);
+
     res.render('device-settings', {
       username: req.session.username,
       device,
       structured,
       rawPrompt: raw,
+      voices,
+      currentVoiceId: agentRows[0].tts_voice_id || '',
       success: req.query.saved === '1' ? 'Đã lưu thành công!' : null,
       error: null,
     });
@@ -458,15 +473,35 @@ app.post('/device/:mac/settings', requireAuth, async (req, res) => {
         device,
         structured,
         rawPrompt: raw,
+        voices: [],
+        currentVoiceId: '',
         success: null,
         error: 'Prompt không được để trống.',
       });
     }
 
-    await pool.query(
-      'UPDATE ai_agent SET system_prompt = ? WHERE id = ?',
-      [newPrompt, device.agent_id]
-    );
+    const selectedVoice = (req.body.voiceId || '').trim();
+    if (selectedVoice && VOICE_IDS_FOR_PARENTS.includes(selectedVoice)) {
+      await pool.query(
+        'UPDATE ai_agent SET system_prompt = ?, tts_voice_id = ? WHERE id = ?',
+        [newPrompt, selectedVoice, device.agent_id]
+      );
+    } else {
+      await pool.query(
+        'UPDATE ai_agent SET system_prompt = ? WHERE id = ?',
+        [newPrompt, device.agent_id]
+      );
+    }
+
+    // Flush Redis so changes take effect immediately
+    try {
+      const Redis = require('ioredis');
+      const redis = new Redis({ host: process.env.REDIS_HOST || 'xiaozhi-esp32-server-redis', port: 6379 });
+      await redis.flushall();
+      redis.disconnect();
+    } catch (redisErr) {
+      console.warn('Redis flush failed (non-critical):', redisErr.message);
+    }
 
     res.redirect(`/device/${encodeURIComponent(mac)}/settings?saved=1`);
   } catch (err) {
@@ -475,165 +510,54 @@ app.post('/device/:mac/settings', requireAuth, async (req, res) => {
   }
 });
 
-// ===========================================
-// Phase 3: Device Status & Daily Summary
-// ===========================================
+// --- Voice preview API ---
+const { Communicate } = require('edge-tts-universal');
+const PREVIEW_DIR = path.join(__dirname, 'data', 'voice-previews');
+if (!fs.existsSync(PREVIEW_DIR)) fs.mkdirSync(PREVIEW_DIR, { recursive: true });
 
-app.get('/device/:mac/status', requireAuth, async (req, res) => {
-  try {
-    const mac = req.params.mac;
-    const [devRows] = await pool.query(
-      `SELECT d.id, d.mac_address, d.alias, d.board, d.app_version,
-              d.agent_id, d.last_connected_at, a.agent_name
-       FROM ai_device d
-       LEFT JOIN ai_agent a ON d.agent_id = a.id
-       WHERE d.mac_address = ? AND d.user_id = ?`,
-      [mac, req.session.userId]
-    );
-    if (devRows.length === 0) return res.status(403).render('error', { message: 'Device not found' });
-    const device = devRows[0];
+const PREVIEW_TEXT = "Hello! My name is Teacher AI. Let's learn English together! Chào bé, hôm nay mình học gì nhé?";
 
-    const isOnline = device.last_connected_at &&
-      (Date.now() - new Date(device.last_connected_at).getTime()) < 5 * 60 * 1000;
-
-    const [totals] = await pool.query(
-      `SELECT COUNT(DISTINCT session_id) AS total_sessions,
-              COUNT(*) AS total_messages,
-              SUM(chat_type = 1) AS student_messages,
-              SUM(chat_type = 2) AS ai_messages
-       FROM ai_agent_chat_history WHERE mac_address = ?`,
-      [mac]
-    );
-
-    const [todayStats] = await pool.query(
-      `SELECT COUNT(DISTINCT session_id) AS sessions,
-              COUNT(*) AS messages,
-              SUM(chat_type = 1) AS student_msgs,
-              MIN(created_at) AS first_msg,
-              MAX(created_at) AS last_msg
-       FROM ai_agent_chat_history
-       WHERE mac_address = ? AND DATE(created_at) = CURDATE()`,
-      [mac]
-    );
-
-    const [musicStats] = await pool.query(
-      `SELECT COUNT(*) AS total_songs FROM parent_music WHERE user_id = ? OR user_id = 'system'`,
-      [req.session.userId]
-    );
-    const [playlistStats] = await pool.query(
-      'SELECT COUNT(*) AS total_playlists FROM parent_playlist WHERE user_id = ?',
-      [req.session.userId]
-    );
-    const [scheduleStats] = await pool.query(
-      'SELECT COUNT(*) AS active_schedules FROM parent_play_schedule WHERE user_id = ? AND is_active = 1',
-      [req.session.userId]
-    );
-
-    const [lastTopic] = await pool.query(
-      `SELECT content FROM ai_agent_chat_history
-       WHERE mac_address = ? AND chat_type = 1 AND DATE(created_at) = CURDATE()
-       ORDER BY created_at DESC LIMIT 1`,
-      [mac]
-    );
-
-    res.render('device-status', {
-      username: req.session.username,
-      device,
-      isOnline,
-      totals: totals[0],
-      today: todayStats[0],
-      musicStats: musicStats[0],
-      playlistStats: playlistStats[0],
-      scheduleStats: scheduleStats[0],
-      lastTopic: lastTopic.length > 0 ? lastTopic[0].content : null,
-    });
-  } catch (err) {
-    console.error('Device status error:', err);
-    res.status(500).render('error', { message: 'Failed to load device status' });
+async function generatePreview(ttsVoice, outputPath) {
+  const comm = new Communicate(PREVIEW_TEXT, ttsVoice);
+  const ws = fs.createWriteStream(outputPath);
+  for await (const chunk of comm.stream()) {
+    if (chunk.type === 'audio') ws.write(chunk.data);
   }
-});
+  ws.end();
+  await new Promise((resolve, reject) => {
+    ws.on('finish', resolve);
+    ws.on('error', reject);
+  });
+}
 
-app.get('/api/device/:mac/status', requireAuth, async (req, res) => {
+app.get('/api/voice/preview/:voiceId', requireAuth, async (req, res) => {
   try {
-    const mac = req.params.mac;
-    const [devRows] = await pool.query(
-      `SELECT d.last_connected_at, d.app_version, a.agent_name
-       FROM ai_device d LEFT JOIN ai_agent a ON d.agent_id = a.id
-       WHERE d.mac_address = ? AND d.user_id = ?`,
-      [mac, req.session.userId]
-    );
-    if (devRows.length === 0) return res.status(403).json({ error: 'Not found' });
-    const dev = devRows[0];
-    const isOnline = dev.last_connected_at &&
-      (Date.now() - new Date(dev.last_connected_at).getTime()) < 5 * 60 * 1000;
-
-    const [todayStats] = await pool.query(
-      `SELECT COUNT(DISTINCT session_id) AS sessions,
-              COUNT(*) AS messages,
-              SUM(chat_type = 1) AS student_msgs
-       FROM ai_agent_chat_history
-       WHERE mac_address = ? AND DATE(created_at) = CURDATE()`,
-      [mac]
-    );
-
-    res.json({
-      isOnline,
-      lastConnected: dev.last_connected_at,
-      appVersion: dev.app_version,
-      agentName: dev.agent_name,
-      today: todayStats[0],
-    });
-  } catch (err) {
-    console.error('API status error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-app.get('/api/device/:mac/daily-summary', requireAuth, async (req, res) => {
-  try {
-    const mac = req.params.mac;
-    const [devCheck] = await pool.query(
-      'SELECT id FROM ai_device WHERE mac_address = ? AND user_id = ?',
-      [mac, req.session.userId]
-    );
-    if (devCheck.length === 0) return res.status(403).json({ error: 'Not found' });
-
-    const [today] = await pool.query(
-      `SELECT COUNT(DISTINCT session_id) AS sessions,
-              COUNT(*) AS messages,
-              SUM(chat_type = 1) AS student_msgs,
-              SUM(chat_type = 2) AS ai_msgs,
-              MIN(created_at) AS first_msg,
-              MAX(created_at) AS last_msg
-       FROM ai_agent_chat_history
-       WHERE mac_address = ? AND DATE(created_at) = CURDATE()`,
-      [mac]
-    );
-
-    const [lastWords] = await pool.query(
-      `SELECT content FROM ai_agent_chat_history
-       WHERE mac_address = ? AND chat_type = 1 AND DATE(created_at) = CURDATE()
-       ORDER BY created_at DESC LIMIT 3`,
-      [mac]
-    );
-
-    const t = today[0];
-    let activeMinutes = 0;
-    if (t.first_msg && t.last_msg) {
-      activeMinutes = Math.round((new Date(t.last_msg) - new Date(t.first_msg)) / 60000);
+    const voiceId = req.params.voiceId;
+    if (!VOICE_IDS_FOR_PARENTS.includes(voiceId)) {
+      return res.status(400).json({ error: 'Invalid voice' });
     }
 
-    res.json({
-      sessions: t.sessions || 0,
-      messages: t.messages || 0,
-      studentMessages: t.student_msgs || 0,
-      aiMessages: t.ai_msgs || 0,
-      activeMinutes,
-      recentWords: lastWords.map(w => w.content),
-    });
+    const [rows] = await pool.query('SELECT tts_voice FROM ai_tts_voice WHERE id = ?', [voiceId]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Voice not found' });
+
+    const ttsVoice = rows[0].tts_voice;
+    const cacheFile = path.join(PREVIEW_DIR, `${voiceId}.mp3`);
+
+    if (!fs.existsSync(cacheFile)) {
+      await generatePreview(ttsVoice, cacheFile);
+    }
+
+    if (!fs.existsSync(cacheFile) || fs.statSync(cacheFile).size === 0) {
+      if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
+      return res.status(500).json({ error: 'Failed to generate preview' });
+    }
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    fs.createReadStream(cacheFile).pipe(res);
   } catch (err) {
-    console.error('Daily summary error:', err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Voice preview error:', err);
+    res.status(500).json({ error: 'Preview generation failed' });
   }
 });
 
@@ -654,8 +578,8 @@ const MUSIC_CATEGORIES = [
 app.get('/music', requireAuth, async (req, res) => {
   try {
     const cat = req.query.category || '';
-    let query = 'SELECT * FROM parent_music WHERE (user_id = ? OR user_id = ?)';
-    const params = [req.session.userId, 'system'];
+    let query = 'SELECT * FROM parent_music WHERE user_id = ?';
+    const params = [req.session.userId];
     if (cat) { query += ' AND category = ?'; params.push(cat); }
     query += ' ORDER BY sort_order ASC, created_at DESC';
     const [songs] = await pool.query(query, params);
@@ -723,8 +647,8 @@ app.post('/music/:id/delete', requireAuth, async (req, res) => {
 app.get('/api/music/stream/:id', requireAuth, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT filename, original_name FROM parent_music WHERE id = ? AND (user_id = ? OR user_id = ?)',
-      [req.params.id, req.session.userId, 'system']
+      'SELECT filename, original_name FROM parent_music WHERE id = ? AND user_id = ?',
+      [req.params.id, req.session.userId]
     );
     if (rows.length === 0) return res.status(404).send('Not found');
     const filepath = path.join(MUSIC_DIR, rows[0].filename);
@@ -814,8 +738,8 @@ app.get('/playlists/:id', requireAuth, async (req, res) => {
     );
 
     const [allSongs] = await pool.query(
-      'SELECT id, title, artist, category FROM parent_music WHERE (user_id = ? OR user_id = ?) ORDER BY title ASC',
-      [req.session.userId, 'system']
+      'SELECT id, title, artist, category FROM parent_music WHERE user_id = ? ORDER BY title ASC',
+      [req.session.userId]
     );
 
     const inPlaylist = new Set(items.map(i => i.id));
@@ -955,7 +879,6 @@ app.post('/schedules/:id/delete', requireAuth, async (req, res) => {
     res.status(500).render('error', { message: 'Failed to delete schedule' });
   }
 });
-
 
 // ===========================================
 // Admin Panel routes
@@ -1164,7 +1087,6 @@ app.post('/admin/quick-setup', requireAdmin, async (req, res) => {
     conn.release();
   }
 });
-
 
 // --- Start ---
 app.listen(PORT, '0.0.0.0', () => {

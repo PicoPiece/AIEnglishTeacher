@@ -14,10 +14,15 @@ services:
       - SESSION_SECRET=aiteacher-parent-session-2026
       - PORT=8005
       - MUSIC_DIR=/data/music
+      - REDIS_HOST=xiaozhi-esp32-server-redis
     volumes:
       - /home/picopiece/xiaozhi-server/music:/data/music
+      - voice-previews:/app/data/voice-previews
     networks:
       - xiaozhi-network
+
+volumes:
+  voice-previews:
 
 networks:
   xiaozhi-network:
