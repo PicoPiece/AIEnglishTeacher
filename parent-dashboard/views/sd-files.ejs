@@ -20,26 +20,27 @@
       <div class="text-sm text-gray-400">
         <%= files.length %> file
         <% if (lastSync) { %>
-          &middot; Đồng bộ lần cuối: <%= new Date(lastSync).toLocaleString('vi-VN') %>
+          &middot; Cập nhật lúc: <%= new Date(lastSync).toLocaleString('vi-VN') %>
         <% } %>
       </div>
     </div>
   </div>
-  <div class="flex items-center gap-3">
-    <span class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full
-      <%= isOnline ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500' %>">
-      <span class="w-2 h-2 rounded-full <%= isOnline ? 'bg-green-500' : 'bg-gray-400' %>"></span>
-      <%= isOnline ? 'Online' : 'Offline' %>
-    </span>
-    <button onclick="syncSdFiles()" id="syncBtn"
-      class="bg-amber-500 hover:bg-amber-600 text-white font-medium px-4 py-2 rounded-lg transition text-sm inline-flex items-center gap-2
-             <%= !isOnline ? 'opacity-50 cursor-not-allowed' : '' %>"
-      <%= !isOnline ? 'disabled' : '' %>>
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-      </svg>
-      Đồng bộ
-    </button>
+  <button onclick="location.reload()" class="text-gray-400 hover:text-gray-600 transition p-2 rounded-lg hover:bg-gray-100" title="Tải lại">
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+    </svg>
+  </button>
+</div>
+
+<div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 text-sm text-blue-700">
+  <div class="flex items-start gap-2">
+    <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <div>
+      <strong>Tự động đồng bộ</strong> &mdash; Danh sách file được cập nhật mỗi khi bé bấm nút nói chuyện với thiết bị.
+      Để thêm nhạc, copy file (.mp3, .wav, .m4a) vào thẻ SD, sau đó bé chỉ cần bấm nút trò chuyện là danh sách sẽ tự cập nhật.
+    </div>
   </div>
 </div>
 
@@ -68,7 +69,7 @@
       </svg>
     </div>
     <p class="text-gray-500 mb-2">Chưa có file nhạc trên thẻ SD</p>
-    <p class="text-sm text-gray-400">Copy file nhạc (.mp3, .wav, .ogg, .m4a) vào thẻ SD trên thiết bị, sau đó nhấn "Đồng bộ".</p>
+    <p class="text-sm text-gray-400">Copy file nhạc vào thẻ SD, sau đó bé bấm nút nói chuyện &mdash; danh sách sẽ tự cập nhật.</p>
   </div>
 <% } else { %>
   <div class="bg-white rounded-xl shadow-sm border divide-y">
@@ -104,31 +105,5 @@
     <% }) %>
   </div>
 <% } %>
-
-<script>
-async function syncSdFiles() {
-  const btn = document.getElementById('syncBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Đang đồng bộ...';
-  try {
-    const resp = await fetch('/device/<%= device.mac_address %>/sd-files/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
-    const data = await resp.json();
-    if (data.success) {
-      setTimeout(() => location.reload(), 1500);
-    } else {
-      alert('Đồng bộ thất bại: ' + (data.error || 'Unknown'));
-      btn.disabled = false;
-      btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Đồng bộ';
-    }
-  } catch (e) {
-    alert('Lỗi: ' + e.message);
-    btn.disabled = false;
-  }
-}
-</script>
 
 <%- include('partials/footer') %>

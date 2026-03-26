@@ -37,7 +37,12 @@ app.use(session({
 }));
 
 function requireAuth(req, res, next) {
-  if (!req.session.userId) return res.redirect('/login');
+  if (!req.session.userId) {
+    if (req.path.startsWith('/api/') || req.xhr || (req.headers.accept && req.headers.accept.includes('application/json'))) {
+      return res.status(401).json({ error: 'Session expired, please login again' });
+    }
+    return res.redirect('/login');
+  }
   next();
 }
 
@@ -1115,6 +1120,49 @@ app.post('/device/:mac/sd-files/sync', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('SD sync error:', err);
     res.status(500).json({ error: 'Sync failed' });
+  }
+});
+
+// SD sync trigger - calls xiaozhi-server Python API to invoke MCP on device
+app.post('/api/device/:mac/sd-sync', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devRows] = await pool.query(
+      'SELECT id FROM ai_device WHERE mac_address = ? AND user_id = ?',
+      [mac, req.session.userId]
+    );
+    if (devRows.length === 0) return res.status(403).json({ error: 'Device not found' });
+
+    const XIAOZHI_HTTP = process.env.XIAOZHI_HTTP_URL || 'http://xiaozhi-esp32-server:8003';
+    const url = `${XIAOZHI_HTTP}/api/sd-sync/${encodeURIComponent(mac)}`;
+    console.log(`[SD-Sync] Calling xiaozhi-server: POST ${url}`);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    const text = await resp.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { error: text.slice(0, 200) }; }
+    console.log(`[SD-Sync] Response (${resp.status}):`, JSON.stringify(data).slice(0, 300));
+    // Always return 200 to avoid Cloudflare replacing error pages with HTML
+    if (resp.ok) {
+      res.json(data);
+    } else {
+      res.json({ success: false, error: data.error || `Server error (${resp.status})`, ...data });
+    }
+  } catch (err) {
+    console.error('[SD-Sync] Error:', err.message);
+    const msg = err.name === 'AbortError'
+      ? 'Timeout: thiết bị không phản hồi (20s). Device có thể offline hoặc chưa hỗ trợ SD sync.'
+      : `Không thể kết nối xiaozhi-server: ${err.message}`;
+    res.json({ success: false, error: msg });
   }
 });
 
