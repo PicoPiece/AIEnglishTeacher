@@ -1086,8 +1086,9 @@ app.post('/device/:mac/sd-files/sync', requireAuth, async (req, res) => {
         const filepath = f.path || f.filepath || '';
         const filename = f.name || f.filename || path.basename(filepath, path.extname(filepath));
         const fileSize = f.size || f.file_size || 0;
-        const parts = filepath.replace(/\\/g, '/').split('/');
-        const category = parts.length > 3 ? parts[parts.length - 2] : 'general';
+        const parts = filepath.replace(/\\/g, '/').split('/').filter(Boolean);
+        const parentDir = parts.length > 1 ? parts[parts.length - 2] : '';
+        const category = (parentDir && parentDir !== 'sdcard') ? parentDir : 'general';
 
         await pool.query(
           `INSERT INTO device_sd_files (mac_address, filepath, filename, file_size, category, last_seen_at)
