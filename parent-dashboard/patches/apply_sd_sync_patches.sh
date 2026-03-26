@@ -8,14 +8,14 @@ PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "=== Applying SD sync patches to $CONTAINER ==="
 
 # 1. Copy new files
-echo "[1/4] Copying connection_registry.py..."
+echo "[1/8] Copying connection_registry.py..."
 docker cp "$PATCH_DIR/connection_registry.py" "$CONTAINER:/opt/xiaozhi-esp32-server/core/connection_registry.py"
 
-echo "[2/4] Copying sd_sync_handler.py..."
+echo "[2/8] Copying sd_sync_handler.py..."
 docker cp "$PATCH_DIR/sd_sync_handler.py" "$CONTAINER:/opt/xiaozhi-esp32-server/core/api/sd_sync_handler.py"
 
 # 3. Patch connection.py - add import and register/unregister calls
-echo "[3/4] Patching connection.py..."
+echo "[3/8] Patching connection.py..."
 docker exec "$CONTAINER" python3 -c "
 import re
 
@@ -41,7 +41,7 @@ else:
     # Add unregister in the finally block, before _save_and_close
     content = content.replace(
         '        finally:\n            try:\n                await self._save_and_close(ws)',
-        '        finally:\n            if self.device_id:\n                connection_registry.unregister(self.device_id)\n            try:\n                await self._save_and_close(ws)',
+        '        finally:\n            if self.device_id:\n                connection_registry.unregister(self.device_id, self)\n            try:\n                await self._save_and_close(ws)',
         1,  # only first occurrence
     )
 
@@ -51,7 +51,7 @@ else:
 "
 
 # 4. Patch http_server.py - add SD sync routes
-echo "[4/4] Patching http_server.py..."
+echo "[4/8] Patching http_server.py..."
 docker exec "$CONTAINER" python3 -c "
 with open('/opt/xiaozhi-esp32-server/core/http_server.py', 'r') as f:
     content = f.read()
@@ -100,11 +100,11 @@ else:
 "
 
 # 5. Copy auto-sync module
-echo "[5/5] Copying sd_auto_sync.py..."
+echo "[5/8] Copying sd_auto_sync.py..."
 docker cp "$PATCH_DIR/sd_auto_sync.py" "$CONTAINER:/opt/xiaozhi-esp32-server/core/providers/tools/device_mcp/sd_auto_sync.py"
 
 # 6. Patch mcp_handler.py - add auto-sync trigger
-echo "[6/6] Patching mcp_handler.py for auto-sync..."
+echo "[6/8] Patching mcp_handler.py for auto-sync..."
 docker exec "$CONTAINER" python3 -c "
 with open('/opt/xiaozhi-esp32-server/core/providers/tools/device_mcp/mcp_handler.py', 'r') as f:
     content = f.read()
@@ -135,8 +135,12 @@ else:
     print('mcp_handler.py patched successfully')
 "
 
-# 7. Patch plugin_executor.py - add play_music to necessary functions
-echo "[7] Patching plugin_executor.py to include play_music..."
+# 7. Copy play_music.py plugin
+echo "[7/8] Copying play_music.py..."
+docker cp "$PATCH_DIR/play_music.py" "$CONTAINER:/opt/xiaozhi-esp32-server/plugins_func/functions/play_music.py"
+
+# 8. Patch plugin_executor.py - add play_music to necessary functions
+echo "[8/8] Patching plugin_executor.py to include play_music..."
 docker exec "$CONTAINER" python3 -c "
 with open('/opt/xiaozhi-esp32-server/core/providers/tools/server_plugins/plugin_executor.py', 'r') as f:
     content = f.read()

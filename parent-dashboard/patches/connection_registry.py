@@ -16,15 +16,31 @@ _connections = {}
 
 def register(device_id: str, conn):
     """Register an active device connection."""
+    old = _connections.get(device_id)
+    if old is not None and old is not conn:
+        logger.bind(tag=TAG).warning(
+            f"Registry: device {device_id} replacing stale connection"
+        )
     _connections[device_id] = conn
     logger.bind(tag=TAG).info(f"Registry: device {device_id} connected (total: {len(_connections)})")
 
 
-def unregister(device_id: str):
-    """Remove a device connection from registry."""
-    removed = _connections.pop(device_id, None)
-    if removed:
-        logger.bind(tag=TAG).info(f"Registry: device {device_id} disconnected (total: {len(_connections)})")
+def unregister(device_id: str, conn=None):
+    """Remove a device connection from registry.
+
+    If conn is provided, only remove if it matches the registered connection.
+    This prevents a late-running finally block from removing a newer connection.
+    """
+    current = _connections.get(device_id)
+    if current is None:
+        return
+    if conn is not None and current is not conn:
+        logger.bind(tag=TAG).debug(
+            f"Registry: skipping unregister for {device_id} (stale conn)"
+        )
+        return
+    del _connections[device_id]
+    logger.bind(tag=TAG).info(f"Registry: device {device_id} disconnected (total: {len(_connections)})")
 
 
 def get(device_id: str):

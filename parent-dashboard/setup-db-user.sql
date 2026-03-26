@@ -30,4 +30,9 @@ GRANT ALL ON xiaozhi_esp32_server.parent_play_schedule TO 'parent_reader'@'%';
 -- SD card file metadata (synced from device)
 GRANT SELECT, INSERT, UPDATE, DELETE ON xiaozhi_esp32_server.device_sd_files TO 'parent_reader'@'%';
 
+-- Dedicated user for Python server patches (sd_auto_sync, play_music, sd_sync_handler)
+-- Minimal privileges: only device_sd_files table
+CREATE USER IF NOT EXISTS 'patch_worker'@'%' IDENTIFIED BY 'patch_worker_pass';
+GRANT SELECT, INSERT, UPDATE, DELETE ON xiaozhi_esp32_server.device_sd_files TO 'patch_worker'@'%';
+
 FLUSH PRIVILEGES;

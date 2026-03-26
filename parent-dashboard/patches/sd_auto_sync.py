@@ -60,12 +60,13 @@ def _save_summary_to_db(mac: str, folders: list) -> int:
     """
     if not folders:
         return 0
+    db = None
     try:
         db = pymysql.connect(
             host=os.environ.get("DB_HOST", "xiaozhi-esp32-server-db"),
             port=int(os.environ.get("DB_PORT", "3306")),
-            user="root",
-            password=os.environ.get("MYSQL_ROOT_PASSWORD", "123456"),
+            user=os.environ.get("PATCH_DB_USER", "patch_worker"),
+            password=os.environ.get("PATCH_DB_PASS", "patch_worker_pass"),
             database="xiaozhi_esp32_server",
             cursorclass=pymysql.cursors.DictCursor,
         )
@@ -84,7 +85,6 @@ def _save_summary_to_db(mac: str, folders: list) -> int:
 
             filepath_key = f"__folder__/{folder}"
             display_name = f"{folder} ({count} songs)"
-            names_csv = "; ".join(names[:50])
 
             cursor.execute(
                 """INSERT INTO device_sd_files
@@ -114,7 +114,7 @@ def _save_summary_to_db(mac: str, folders: list) -> int:
                 )
                 synced_keys.append(file_key)
 
-        if len(synced_keys) >= 3:
+        if synced_keys:
             placeholders = ",".join(["%s"] * len(synced_keys))
             cursor.execute(
                 f"DELETE FROM device_sd_files WHERE mac_address = %s AND filepath NOT IN ({placeholders})",
@@ -123,11 +123,16 @@ def _save_summary_to_db(mac: str, folders: list) -> int:
 
         db.commit()
         cursor.close()
-        db.close()
         return total_files
     except Exception as e:
         logger.bind(tag=TAG).error(f"SD auto-sync DB error: {e}")
         return -1
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 async def auto_sync_sd_files(conn, mcp_client):

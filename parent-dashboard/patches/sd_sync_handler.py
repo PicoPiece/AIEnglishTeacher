@@ -22,8 +22,8 @@ def _db_connect():
     return pymysql.connect(
         host=os.environ.get("DB_HOST", "xiaozhi-esp32-server-db"),
         port=int(os.environ.get("DB_PORT", "3306")),
-        user="root",
-        password=os.environ.get("MYSQL_ROOT_PASSWORD", "123456"),
+        user=os.environ.get("PATCH_DB_USER", "patch_worker"),
+        password=os.environ.get("PATCH_DB_PASS", "patch_worker_pass"),
         database="xiaozhi_esp32_server",
         cursorclass=pymysql.cursors.DictCursor,
     )
@@ -31,6 +31,7 @@ def _db_connect():
 
 def _save_files_to_db(mac: str, file_list: list) -> int:
     """Upsert SD file list to database. Returns count of files saved, -1 on error."""
+    db = None
     try:
         db = _db_connect()
         cursor = db.cursor()
@@ -68,11 +69,27 @@ def _save_files_to_db(mac: str, file_list: list) -> int:
 
         db.commit()
         cursor.close()
-        db.close()
         return len(synced_paths)
     except Exception as e:
         logger.bind(tag=TAG).error(f"SD sync DB error: {e}")
         return -1
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+SD_SYNC_SECRET = os.environ.get("SD_SYNC_SECRET", "")
+
+
+def _check_auth(request: web.Request) -> bool:
+    """Validate shared secret for SD sync API calls."""
+    if not SD_SYNC_SECRET:
+        return True
+    token = request.headers.get("X-Sync-Secret", "")
+    return token == SD_SYNC_SECRET
 
 
 class SDSyncHandler(BaseHandler):
@@ -80,6 +97,8 @@ class SDSyncHandler(BaseHandler):
         super().__init__(config)
 
     async def handle_list_devices(self, request: web.Request) -> web.Response:
+        if not _check_auth(request):
+            return self._error_response("Unauthorized", 401)
         """GET /api/sd-sync/devices -- list connected devices with MCP."""
         devices = connection_registry.list_devices()
         result = []
@@ -103,6 +122,8 @@ class SDSyncHandler(BaseHandler):
 
     async def handle_sync(self, request: web.Request) -> web.Response:
         """POST /api/sd-sync/<mac> -- trigger MCP list_sd_music and save to DB."""
+        if not _check_auth(request):
+            return self._error_response("Unauthorized", 401)
         mac = request.match_info.get("mac", "")
         if not mac:
             return self._error_response("Missing mac address", 400)
@@ -110,7 +131,7 @@ class SDSyncHandler(BaseHandler):
         conn = connection_registry.get(mac)
         if conn is None:
             return self._error_response(
-                f"Device {mac} not connected. Connected: {connection_registry.list_devices()}",
+                f"Device {mac} not connected",
                 404, online=False,
             )
 
@@ -130,18 +151,36 @@ class SDSyncHandler(BaseHandler):
 
         try:
             from core.providers.tools.device_mcp.mcp_handler import call_mcp_tool
+            from core.providers.tools.device_mcp.sd_auto_sync import (
+                _parse_compact_summary, _save_summary_to_db,
+            )
 
             result = await call_mcp_tool(conn, conn.mcp_client, tool_name, "{}", timeout=15)
             logger.bind(tag=TAG).info(f"SD sync MCP result for {mac}: {str(result)[:300]}")
 
-            file_list = json.loads(result) if isinstance(result, str) else result
-            if not isinstance(file_list, list):
-                return self._error_response(
-                    f"Unexpected MCP response: {str(result)[:500]}", 500
-                )
+            if not result or not isinstance(result, str):
+                return self._error_response("Empty MCP response", 500)
 
-            count = _save_files_to_db(mac, file_list)
-            resp = web.json_response({"success": True, "count": count, "files": file_list})
+            folders = _parse_compact_summary(result)
+            if folders:
+                count = _save_summary_to_db(mac, folders)
+                total = sum(f["file_count"] for f in folders)
+                resp = web.json_response({
+                    "success": True, "count": count,
+                    "folders": len(folders), "total_files": total,
+                })
+            else:
+                # Fallback: try old JSON format
+                try:
+                    file_list = json.loads(result)
+                    if isinstance(file_list, list):
+                        count = _save_files_to_db(mac, file_list)
+                        resp = web.json_response({"success": True, "count": count})
+                    else:
+                        return self._error_response(f"Unexpected response format", 500)
+                except (json.JSONDecodeError, TypeError):
+                    return self._error_response(f"Cannot parse response: {str(result)[:200]}", 500)
+
             self._add_cors_headers(resp)
             return resp
 

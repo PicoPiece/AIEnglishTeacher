@@ -99,13 +99,14 @@ def _find_best_match(potential_song, music_files):
 
 def _has_sd_music(mac_address):
     """Check if device has any SD card music in the database."""
+    import pymysql
+    db = None
     try:
-        import pymysql
         db = pymysql.connect(
             host=os.environ.get("DB_HOST", "xiaozhi-esp32-server-db"),
             port=int(os.environ.get("DB_PORT", "3306")),
-            user="root",
-            password=os.environ.get("DB_ROOT_PASS", "123456"),
+            user=os.environ.get("PATCH_DB_USER", "patch_worker"),
+            password=os.environ.get("PATCH_DB_PASS", "patch_worker_pass"),
             database="xiaozhi_esp32_server",
             cursorclass=pymysql.cursors.DictCursor,
         )
@@ -116,10 +117,15 @@ def _has_sd_music(mac_address):
         )
         row = cursor.fetchone()
         cursor.close()
-        db.close()
         return row and row["cnt"] > 0
     except Exception:
         return False
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def get_music_files(music_dir, music_ext):

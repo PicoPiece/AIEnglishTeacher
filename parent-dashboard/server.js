@@ -3,6 +3,7 @@ const session = require('express-session');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -33,7 +34,12 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
   resave: false,
   saveUninitialized: false,
-  cookie: { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 },
+  cookie: {
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  },
 }));
 
 function requireAuth(req, res, next) {
@@ -153,7 +159,6 @@ app.post('/login', async (req, res) => {
       valid = await bcrypt.compare(password, hash);
     } else {
       // Fallback: SHA-256 hex used by some xiaozhi-server forks
-      const crypto = require('crypto');
       const sha = crypto.createHash('sha256').update(password).digest('hex');
       valid = (sha === hash);
     }
@@ -266,6 +271,13 @@ app.get('/history/:sessionId', requireAuth, async (req, res) => {
   try {
     const sessionId = req.params.sessionId;
 
+    // Auth check first: only load messages for devices owned by this user
+    const [userDevices] = await pool.query(
+      'SELECT mac_address, alias FROM ai_device WHERE user_id = ?',
+      [req.session.userId]
+    );
+    const ownedMacs = new Set(userDevices.map(d => d.mac_address));
+
     const [msgs] = await pool.query(
       `SELECT h.id, h.mac_address, h.chat_type, h.content, h.created_at
        FROM ai_agent_chat_history h
@@ -284,17 +296,16 @@ app.get('/history/:sessionId', requireAuth, async (req, res) => {
     }
 
     const firstMac = msgs[0].mac_address;
-    const [devRows] = await pool.query(
-      'SELECT mac_address, alias FROM ai_device WHERE mac_address = ? AND user_id = ?',
-      [firstMac, req.session.userId]
-    );
-    if (devRows.length === 0) return res.status(403).render('error', { message: 'Access denied' });
+    if (!ownedMacs.has(firstMac)) {
+      return res.status(403).render('error', { message: 'Access denied' });
+    }
 
+    const devInfo = userDevices.find(d => d.mac_address === firstMac);
     res.render('history', {
       username: req.session.username,
       sessionId,
       messages: msgs,
-      deviceName: devRows[0].alias || devRows[0].mac_address,
+      deviceName: devInfo ? (devInfo.alias || devInfo.mac_address) : firstMac,
     });
   } catch (err) {
     console.error('History error:', err);
@@ -544,14 +555,29 @@ app.post('/device/:mac/settings', requireAuth, async (req, res) => {
     }
 
     if (!newPrompt) {
-      const { structured, raw } = parsePromptFields(newPrompt);
+      const [agentRows] = await pool.query(
+        'SELECT tts_voice_id FROM ai_agent WHERE id = ?', [device.agent_id]
+      );
+      const currentVoiceId = agentRows.length > 0 ? (agentRows[0].tts_voice_id || '') : '';
+
+      const [voiceRows] = await pool.query(
+        'SELECT id, name, tts_voice, languages FROM ai_tts_voice WHERE id IN (?)',
+        [VOICE_IDS_FOR_PARENTS]
+      );
+      const voices = VOICE_IDS_FOR_PARENTS.map(vid => {
+        const row = voiceRows.find(r => r.id === vid);
+        const meta = VOICE_META[vid] || {};
+        return row ? { id: row.id, tts_voice: row.tts_voice, ...meta } : null;
+      }).filter(Boolean);
+
+      const { structured, raw } = parsePromptFields('');
       return res.render('device-settings', {
         username: req.session.username,
         device,
         structured,
         rawPrompt: raw,
-        voices: [],
-        currentVoiceId: '',
+        voices,
+        currentVoiceId,
         success: null,
         error: 'Prompt không được để trống.',
       });
@@ -570,15 +596,9 @@ app.post('/device/:mac/settings', requireAuth, async (req, res) => {
       );
     }
 
-    // Flush Redis so changes take effect immediately
-    try {
-      const Redis = require('ioredis');
-      const redis = new Redis({ host: process.env.REDIS_HOST || 'xiaozhi-esp32-server-redis', port: 6379 });
-      await redis.flushall();
-      redis.disconnect();
-    } catch (redisErr) {
-      console.warn('Redis flush failed (non-critical):', redisErr.message);
-    }
+    // Server uses in-memory prompt cache per connection.
+    // Each device reconnect creates a fresh PromptManager that loads from DB.
+    // No cache invalidation needed - changes apply on next device reconnect.
 
     res.redirect(`/device/${encodeURIComponent(mac)}/settings?saved=1`);
   } catch (err) {
@@ -618,9 +638,15 @@ app.get('/api/voice/preview/:voiceId', requireAuth, async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Voice not found' });
 
     const ttsVoice = rows[0].tts_voice;
-    const cacheFile = path.join(PREVIEW_DIR, `${voiceId}.mp3`);
+    const voiceHash = crypto.createHash('md5').update(ttsVoice).digest('hex').slice(0, 8);
+    const cacheFile = path.join(PREVIEW_DIR, `${voiceId}_${voiceHash}.mp3`);
 
     if (!fs.existsSync(cacheFile)) {
+      // Remove old cache files for this voiceId (different voice mapping)
+      try {
+        const oldFiles = fs.readdirSync(PREVIEW_DIR).filter(f => f.startsWith(voiceId) && f !== path.basename(cacheFile));
+        oldFiles.forEach(f => fs.unlinkSync(path.join(PREVIEW_DIR, f)));
+      } catch (e) { /* ignore cleanup errors */ }
       await generatePreview(ttsVoice, cacheFile);
     }
 
@@ -667,7 +693,9 @@ app.get('/music', requireAuth, async (req, res) => {
     );
 
     let sdFiles = [];
-    const selectedMac = req.query.device || (devices.length > 0 ? devices[0].mac_address : '');
+    const ownedMacs = new Set(devices.map(d => d.mac_address));
+    const requestedMac = req.query.device || (devices.length > 0 ? devices[0].mac_address : '');
+    const selectedMac = ownedMacs.has(requestedMac) ? requestedMac : (devices.length > 0 ? devices[0].mac_address : '');
     if (selectedMac) {
       let sdQuery = 'SELECT * FROM device_sd_files WHERE mac_address = ?';
       const sdParams = [selectedMac];
@@ -887,6 +915,24 @@ app.post('/playlists/:id/add-song', requireAuth, async (req, res) => {
     );
     if (plRows.length === 0) return res.status(403).send('Not allowed');
 
+    if (musicId) {
+      const [mRows] = await pool.query(
+        'SELECT id FROM parent_music WHERE id = ? AND user_id = ?',
+        [musicId, req.session.userId]
+      );
+      if (mRows.length === 0) return res.status(403).send('Music not found or not yours');
+    }
+    if (sdFileId) {
+      const [sdRows] = await pool.query(
+        `SELECT sd.id FROM device_sd_files sd
+         JOIN ai_device d ON sd.mac_address = d.mac_address
+         WHERE sd.id = ? AND d.user_id = ?`,
+        [sdFileId, req.session.userId]
+      );
+      if (sdRows.length === 0) return res.status(403).send('SD file not found or not your device');
+    }
+    if (!musicId && !sdFileId) return res.status(400).send('No song selected');
+
     const [maxOrder] = await pool.query(
       'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM parent_playlist_item WHERE playlist_id = ?',
       [playlistId]
@@ -963,6 +1009,19 @@ app.get('/schedules', requireAuth, async (req, res) => {
 app.post('/schedules', requireAuth, async (req, res) => {
   try {
     const { mac_address, playlist_id, start_time, end_time, days_of_week } = req.body;
+
+    const [devCheck] = await pool.query(
+      'SELECT mac_address FROM ai_device WHERE mac_address = ? AND user_id = ?',
+      [mac_address, req.session.userId]
+    );
+    if (devCheck.length === 0) return res.status(403).render('error', { message: 'Device not found' });
+
+    const [plCheck] = await pool.query(
+      'SELECT id FROM parent_playlist WHERE id = ? AND user_id = ?',
+      [playlist_id, req.session.userId]
+    );
+    if (plCheck.length === 0) return res.status(403).render('error', { message: 'Playlist not found' });
+
     const days = Array.isArray(days_of_week) ? days_of_week.join(',') : (days_of_week || '1,2,3,4,5,6,7');
     await pool.query(
       `INSERT INTO parent_play_schedule (user_id, mac_address, playlist_id, start_time, end_time, days_of_week)
@@ -1071,6 +1130,34 @@ app.get('/api/device/:mac/sd-files.json', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/device/:mac/status', requireAuth, async (req, res) => {
+  try {
+    const mac = req.params.mac;
+    const [devRows] = await pool.query(
+      'SELECT last_connected_at FROM ai_device WHERE mac_address = ? AND user_id = ?',
+      [mac, req.session.userId]
+    );
+    if (devRows.length === 0) return res.status(403).json({ error: 'Device not found' });
+
+    const isOnline = devRows[0].last_connected_at &&
+      (Date.now() - new Date(devRows[0].last_connected_at).getTime()) < 5 * 60 * 1000;
+
+    const [todayStats] = await pool.query(
+      `SELECT COUNT(DISTINCT session_id) AS sessions,
+              COUNT(*) AS messages,
+              SUM(chat_type = 1) AS student_msgs
+       FROM ai_agent_chat_history
+       WHERE mac_address = ? AND DATE(created_at) = CURDATE()`,
+      [mac]
+    );
+
+    res.json({ isOnline, today: todayStats[0] });
+  } catch (err) {
+    console.error('Device status API error:', err);
+    res.status(500).json({ error: 'Failed to load status' });
+  }
+});
+
 app.post('/device/:mac/sd-files/sync', requireAuth, async (req, res) => {
   try {
     const mac = req.params.mac;
@@ -1140,9 +1227,13 @@ app.post('/api/device/:mac/sd-sync', requireAuth, async (req, res) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
 
+    const syncHeaders = { 'Content-Type': 'application/json' };
+    if (process.env.SD_SYNC_SECRET) {
+      syncHeaders['X-Sync-Secret'] = process.env.SD_SYNC_SECRET;
+    }
     const resp = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: syncHeaders,
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -1169,8 +1260,6 @@ app.post('/api/device/:mac/sd-sync', requireAuth, async (req, res) => {
 // ===========================================
 // Admin Panel routes
 // ===========================================
-
-const crypto = require('crypto');
 
 const TEMPLATE_AGENT_ID = '364609f2c11d489f9dd9e561df3d0568';
 
