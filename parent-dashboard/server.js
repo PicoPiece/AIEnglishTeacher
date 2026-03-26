@@ -1275,7 +1275,7 @@ app.post('/admin/devices/:mac/create-agent', requireAdmin, async (req, res) => {
     const agentName = (req.body.agent_name || '').trim() || 'EnglishTeacher';
 
     const [template] = await pool.query(
-      'SELECT system_prompt, chat_history_conf, tts_model_id, tts_voice_id, asr_model_id, llm_model_id, mem_model_id FROM ai_agent WHERE id = ?',
+      'SELECT system_prompt, chat_history_conf, tts_model_id, tts_voice_id, asr_model_id, llm_model_id, mem_model_id, intent_model_id FROM ai_agent WHERE id = ?',
       [TEMPLATE_AGENT_ID]
     );
     const t = template.length > 0 ? template[0] : {};
@@ -1284,9 +1284,9 @@ app.post('/admin/devices/:mac/create-agent', requireAdmin, async (req, res) => {
 
     const newId = generateUUID();
     await pool.query(
-      `INSERT INTO ai_agent (id, agent_name, system_prompt, chat_history_conf, tts_model_id, tts_voice_id, asr_model_id, llm_model_id, mem_model_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [newId, agentName, systemPrompt, chatHistoryConf, t.tts_model_id, t.tts_voice_id, t.asr_model_id, t.llm_model_id, t.mem_model_id]
+      `INSERT INTO ai_agent (id, agent_name, system_prompt, chat_history_conf, tts_model_id, tts_voice_id, asr_model_id, llm_model_id, mem_model_id, intent_model_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [newId, agentName, systemPrompt, chatHistoryConf, t.tts_model_id, t.tts_voice_id, t.asr_model_id, t.llm_model_id, t.mem_model_id, t.intent_model_id || 'Intent_function_call']
     );
 
     await pool.query('UPDATE ai_device SET agent_id = ? WHERE mac_address = ?', [newId, mac]);
@@ -1345,7 +1345,7 @@ app.post('/admin/quick-setup', requireAdmin, async (req, res) => {
     }
 
     const [template] = await conn.query(
-      'SELECT system_prompt, chat_history_conf, tts_model_id, tts_voice_id, asr_model_id, llm_model_id, mem_model_id FROM ai_agent WHERE id = ?',
+      'SELECT system_prompt, chat_history_conf, tts_model_id, tts_voice_id, asr_model_id, llm_model_id, mem_model_id, intent_model_id FROM ai_agent WHERE id = ?',
       [TEMPLATE_AGENT_ID]
     );
     const t = template.length > 0 ? template[0] : {};
@@ -1355,9 +1355,9 @@ app.post('/admin/quick-setup', requireAdmin, async (req, res) => {
     const newAgentId = generateUUID();
     const finalAgentName = (agent_name || '').trim() || 'EnglishTeacher';
     await conn.query(
-      `INSERT INTO ai_agent (id, agent_name, system_prompt, chat_history_conf, tts_model_id, tts_voice_id, asr_model_id, llm_model_id, mem_model_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [newAgentId, finalAgentName, systemPrompt, chatHistoryConf, t.tts_model_id, t.tts_voice_id, t.asr_model_id, t.llm_model_id, t.mem_model_id]
+      `INSERT INTO ai_agent (id, agent_name, system_prompt, chat_history_conf, tts_model_id, tts_voice_id, asr_model_id, llm_model_id, mem_model_id, intent_model_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [newAgentId, finalAgentName, systemPrompt, chatHistoryConf, t.tts_model_id, t.tts_voice_id, t.asr_model_id, t.llm_model_id, t.mem_model_id, t.intent_model_id || 'Intent_function_call']
     );
 
     await conn.query(

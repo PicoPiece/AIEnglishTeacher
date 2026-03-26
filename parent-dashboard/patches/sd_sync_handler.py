@@ -23,7 +23,7 @@ def _db_connect():
         host=os.environ.get("DB_HOST", "xiaozhi-esp32-server-db"),
         port=int(os.environ.get("DB_PORT", "3306")),
         user="root",
-        password=os.environ.get("MYSQL_ROOT_PASSWORD", "xiaozhi_esp32_123456"),
+        password=os.environ.get("MYSQL_ROOT_PASSWORD", "123456"),
         database="xiaozhi_esp32_server",
         cursorclass=pymysql.cursors.DictCursor,
     )

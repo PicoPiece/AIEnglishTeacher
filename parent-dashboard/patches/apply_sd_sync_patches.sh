@@ -135,6 +135,23 @@ else:
     print('mcp_handler.py patched successfully')
 "
 
+# 7. Patch plugin_executor.py - add play_music to necessary functions
+echo "[7] Patching plugin_executor.py to include play_music..."
+docker exec "$CONTAINER" python3 -c "
+with open('/opt/xiaozhi-esp32-server/core/providers/tools/server_plugins/plugin_executor.py', 'r') as f:
+    content = f.read()
+
+old = '        necessary_functions = [\"handle_exit_intent\", \"get_lunar\"]'
+new = '        necessary_functions = [\"handle_exit_intent\", \"get_lunar\", \"play_music\"]'
+if 'play_music' in content:
+    print('plugin_executor.py already patched')
+else:
+    content = content.replace(old, new)
+    with open('/opt/xiaozhi-esp32-server/core/providers/tools/server_plugins/plugin_executor.py', 'w') as f:
+        f.write(content)
+    print('plugin_executor.py patched successfully')
+"
+
 echo ""
 echo "=== All patches applied! ==="
 echo "Restart the container: docker restart $CONTAINER"
