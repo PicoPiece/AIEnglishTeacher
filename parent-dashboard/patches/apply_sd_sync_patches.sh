@@ -156,6 +156,10 @@ else:
     print('plugin_executor.py patched successfully')
 "
 
+# 9. Replace base prompt template (Chinese → English)
+echo "[9/9] Replacing agent-base-prompt.txt (Chinese → English)..."
+docker cp "$PATCH_DIR/agent-base-prompt.txt" "$CONTAINER:/opt/xiaozhi-esp32-server/agent-base-prompt.txt"
+
 echo ""
 echo "=== All patches applied! ==="
 echo "Restart the container: docker restart $CONTAINER"
